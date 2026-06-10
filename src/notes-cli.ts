@@ -59,14 +59,17 @@ export async function generateNotesViaCli(
   transcript: string,
 ): Promise<MeetingNotes> {
   const model = process.env.NOTES_CLI_MODEL || "sonnet";
+  // Весь промт — через stdin: многострочные argv ломаются в Windows-шелле
   const raw = await runClaude(
-    ["-p", CLI_INSTRUCTION, "--output-format", "json", "--model", model],
-    notesUserPrompt(title, dateISO, transcript),
+    ["-p", "--output-format", "json", "--model", model],
+    `${CLI_INSTRUCTION}\n\n${notesUserPrompt(title, dateISO, transcript)}`,
     10 * 60_000,
   );
-  // stdout может содержать строки-предупреждения до JSON-объекта результата
-  const lines = raw.split(/\r?\n/).filter((l) => l.trim().startsWith("{"));
-  const envelope = JSON.parse(lines.join("")) as { is_error?: boolean; result?: string };
+  // stdout может содержать предупреждения до JSON-конверта результата
+  const idx = raw.indexOf('{"type":"result"');
+  const jsonStart = idx >= 0 ? idx : raw.indexOf("{");
+  if (jsonStart < 0) throw new Error(`claude CLI вернул не-JSON: ${raw.slice(0, 300)}`);
+  const envelope = JSON.parse(raw.slice(jsonStart)) as { is_error?: boolean; result?: string };
   if (envelope.is_error || !envelope.result) {
     throw new Error(`claude CLI error: ${envelope.result ?? raw.slice(0, 300)}`);
   }
