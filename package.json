@@ -1,0 +1,20 @@
+{
+  "name": "tryll-meet-notes",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Calendar-driven meeting bot: joins Google Meet via Vexa, transcribes with speakers, generates notes with Claude, saves .docx to Google Drive",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.104.1",
+    "@upstash/redis": "^1.38.0",
+    "docx": "^9.7.1",
+    "googleapis": "^173.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.2",
+    "@vercel/node": "^5.8.15",
+    "typescript": "^6.0.3"
+  }
+}
