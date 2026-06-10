@@ -1,7 +1,5 @@
 import { Redis } from "@upstash/redis";
 
-export const redis = Redis.fromEnv();
-
 export type MeetingStatus =
   | "joining" // бот отправлен, созвон идёт
   | "awaiting_notes" // транскрипт получен, ждём заметки (путь B без API-ключа)
@@ -28,37 +26,64 @@ export interface MeetingRecord {
 const ACTIVE = "meetings:active";
 const PENDING = "meetings:pending";
 
+const hasRedis = Boolean(
+  process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN,
+);
+const redis = hasRedis ? Redis.fromEnv() : null;
+
+// In-memory fallback для локального запуска (scripts/local.ts):
+// живёт, пока жив процесс — для прод-деплоя на Vercel нужен Upstash.
+const memMeetings = new Map<string, MeetingRecord>();
+const memSets = new Map<string, Set<string>>();
+const memSet = (name: string) => {
+  let s = memSets.get(name);
+  if (!s) {
+    s = new Set();
+    memSets.set(name, s);
+  }
+  return s;
+};
+
 const key = (eventId: string) => `meeting:${eventId}`;
 
 export async function getMeeting(eventId: string): Promise<MeetingRecord | null> {
+  if (!redis) return memMeetings.get(eventId) ?? null;
   return (await redis.get<MeetingRecord>(key(eventId))) ?? null;
 }
 
 export async function saveMeeting(m: MeetingRecord): Promise<void> {
+  if (!redis) {
+    memMeetings.set(m.eventId, m);
+    return;
+  }
   // храним 14 дней, чтобы dedup по eventId переживал повторные тики
   await redis.set(key(m.eventId), m, { ex: 14 * 24 * 3600 });
 }
 
-export async function markActive(eventId: string): Promise<void> {
-  await redis.sadd(ACTIVE, eventId);
+async function sadd(set: string, member: string): Promise<void> {
+  if (!redis) {
+    memSet(set).add(member);
+    return;
+  }
+  await redis.sadd(set, member);
 }
 
-export async function unmarkActive(eventId: string): Promise<void> {
-  await redis.srem(ACTIVE, eventId);
+async function srem(set: string, member: string): Promise<void> {
+  if (!redis) {
+    memSet(set).delete(member);
+    return;
+  }
+  await redis.srem(set, member);
 }
 
-export async function listActive(): Promise<string[]> {
-  return (await redis.smembers(ACTIVE)) as string[];
+async function smembers(set: string): Promise<string[]> {
+  if (!redis) return [...memSet(set)];
+  return (await redis.smembers(set)) as string[];
 }
 
-export async function markPending(eventId: string): Promise<void> {
-  await redis.sadd(PENDING, eventId);
-}
-
-export async function unmarkPending(eventId: string): Promise<void> {
-  await redis.srem(PENDING, eventId);
-}
-
-export async function listPending(): Promise<string[]> {
-  return (await redis.smembers(PENDING)) as string[];
-}
+export const markActive = (id: string) => sadd(ACTIVE, id);
+export const unmarkActive = (id: string) => srem(ACTIVE, id);
+export const listActive = () => smembers(ACTIVE);
+export const markPending = (id: string) => sadd(PENDING, id);
+export const unmarkPending = (id: string) => srem(PENDING, id);
+export const listPending = () => smembers(PENDING);
