@@ -1,6 +1,7 @@
 import { upcomingMeetings } from "./calendar";
 import { finalizeMeeting } from "./finalize";
-import { generateNotes } from "./notes";
+import { generateNotes, MeetingNotes } from "./notes";
+import { generateNotesViaCli } from "./notes-cli";
 import {
   getMeeting,
   listActive,
@@ -76,10 +77,16 @@ async function collectFinished(log: string[]): Promise<void> {
     m.transcript = transcript;
     await unmarkActive(eventId);
 
-    if (process.env.ANTHROPIC_API_KEY) {
-      // Путь A: заметки прямо здесь через Claude Sonnet
+    // Режим заметок: cli (локальный Claude Code по подписке) | api (ANTHROPIC_API_KEY) | queue
+    const mode =
+      process.env.NOTES_MODE ?? (process.env.ANTHROPIC_API_KEY ? "api" : "queue");
+
+    if (mode === "cli" || mode === "api") {
       try {
-        const notes = await generateNotes(m.title, m.startISO, transcript);
+        const notes: MeetingNotes =
+          mode === "cli"
+            ? await generateNotesViaCli(m.title, m.startISO, transcript)
+            : await generateNotes(m.title, m.startISO, transcript);
         const url = await finalizeMeeting(m, notes);
         log.push(`done: ${m.title} → ${url}`);
       } catch (e) {
