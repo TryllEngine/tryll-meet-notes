@@ -4,7 +4,7 @@
  * Запуск: npx tsx scripts/watch-meeting.ts <native_meeting_id> <title>
  */
 import "dotenv/config";
-import { writeFileSync } from "fs";
+import { mkdirSync, writeFileSync } from "fs";
 import { buildNotesDocx } from "../src/docx";
 import { generateNotesViaCli } from "../src/notes-cli";
 import { getTranscript, runningBots } from "../src/vexa";
@@ -44,17 +44,19 @@ async function poll(): Promise<void> {
     process.exit(2);
   }
   const dateISO = new Date().toISOString();
-  const base = `recordings/${title} — ${dateISO.slice(0, 10)}`;
-  writeFileSync(`${base}.txt`, transcript, "utf-8");
-  console.log(`транскрипт: ${base}.txt (${transcript.length} символов)`);
+  const name = `${title} — ${dateISO.slice(0, 10)}`;
+  // в recordings/ — только готовые заметки; всё техническое — в recordings/tech/
+  mkdirSync("recordings/tech", { recursive: true });
+  writeFileSync(`recordings/tech/${name}.txt`, transcript, "utf-8");
+  console.log(`транскрипт: recordings/tech/${name}.txt (${transcript.length} символов)`);
 
   console.log("генерирую заметки через claude CLI (подписка)...");
   const notes = await generateNotesViaCli(title, dateISO, transcript);
-  writeFileSync(`${base}.json`, JSON.stringify(notes, null, 2), "utf-8");
+  writeFileSync(`recordings/tech/${name}.json`, JSON.stringify(notes, null, 2), "utf-8");
 
   const docx = await buildNotesDocx(title, dateISO, notes, transcript);
-  writeFileSync(`${base}.docx`, docx);
-  console.log(`ГОТОВО: ${base}.docx`);
+  writeFileSync(`recordings/${name}.docx`, docx);
+  console.log(`ГОТОВО: recordings/${name}.docx`);
   process.exit(0);
 }
 
