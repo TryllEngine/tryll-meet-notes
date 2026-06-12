@@ -17,6 +17,21 @@ else:
     io.open(p, 'w', encoding='utf-8').write(src.replace(anchor, patch))
     print('patched')
 "
-# перезапуск meeting-api (supervisord поднимет сам)
+# Патч 2: аватар на весь кадр камеры (в стоке — 12% высоты, крошечная карточка)
+docker exec vexa-lite python3 -c "
+import io
+p = '/app/vexa-bot/dist/services/screen-content.js'
+src = io.open(p, encoding='utf-8').read()
+anchor = 'Math.max(Math.round(canvas.height * 0.12), 100)'
+if 'tryll fullframe' in src:
+    print('avatar size: already patched')
+elif anchor not in src:
+    raise SystemExit('AVATAR ANCHOR NOT FOUND — версия Vexa изменилась')
+else:
+    io.open(p, 'w', encoding='utf-8').write(src.replace(anchor, 'Math.max(canvas.width, canvas.height) /* tryll fullframe */'))
+    print('avatar size: patched (full-frame)')
+"
+
+# перезапуск meeting-api (supervisord поднимет сам); боты подхватят патч при следующем запуске
 docker exec vexa-lite sh -c "kill \$(ps aux | grep 'meeting_api.main' | grep -v grep | awk '{print \$2}')"
 echo "meeting-api перезапускается..."
