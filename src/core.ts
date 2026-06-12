@@ -70,10 +70,23 @@ async function collectFinished(log: string[]): Promise<void> {
       log.push(`bot force-stopped (overtime): ${m.title}`);
       continue; // транскрипт заберём на следующем тике
     }
-    if (botRunning) continue; // созвон ещё идёт
+    if (botRunning) {
+      if (m.botGoneAtISO) {
+        m.botGoneAtISO = undefined; // бот вернулся/мигнул статус — сброс грейса
+        await saveMeeting(m);
+      }
+      continue; // созвон ещё идёт
+    }
     if (now < Date.parse(m.startISO) + 2 * 60_000) continue; // бот мог ещё не успеть зайти
 
-    // бот вышел — созвон закончился (или бота не пустили)
+    // бот вышел: даём транскрипции 60 сек дообработать хвост аудио
+    if (!m.botGoneAtISO) {
+      m.botGoneAtISO = new Date(now).toISOString();
+      await saveMeeting(m);
+      continue;
+    }
+    if (now < Date.parse(m.botGoneAtISO) + 60_000) continue;
+
     const transcript = await getTranscript(m.nativeId);
     if (!transcript) {
       m.status = "failed";

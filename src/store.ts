@@ -21,6 +21,8 @@ export interface MeetingRecord {
   error?: string;
   transcript?: string;
   noteDocUrl?: string;
+  /** когда заметили, что бот вышел из звонка (грейс перед сбором транскрипта) */
+  botGoneAtISO?: string;
 }
 
 const ACTIVE = "meetings:active";
