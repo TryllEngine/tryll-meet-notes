@@ -48,7 +48,7 @@ function calendarIds(): string[] {
  */
 export async function upcomingMeetings(
   lookbackMin = 10,
-  lookaheadMin = 2,
+  lookaheadMin = 5,
 ): Promise<UpcomingMeeting[]> {
   const cal = google.calendar({ version: "v3", auth: googleAuth() });
   const now = Date.now();
@@ -81,8 +81,9 @@ export async function upcomingMeetings(
     const nativeId = extractMeetCode(ev);
     if (!nativeId) continue; // нет ссылки на Meet — не созвон
     const startMs = Date.parse(ev.start.dateTime);
-    // отправляем бота только когда старт уже в пределах одной минуты или встреча идёт
-    if (startMs > now + 60_000) continue;
+    // отправляем бота через ~20 сек после начала мита: к этому моменту в звонке
+    // обычно уже есть человек, который впустит бота из зала ожидания
+    if (now < startMs + 20_000) continue;
     if (seenNative.has(nativeId)) continue; // общий мит двух календарей — один бот
     seenNative.add(nativeId);
     out.push({
