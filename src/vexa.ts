@@ -35,6 +35,13 @@ export async function requestBot(nativeId: string): Promise<void> {
   if (process.env.BOT_AVATAR_URL) {
     body.default_avatar_url = process.env.BOT_AVATAR_URL;
   }
+  // Authenticated-режим: бот заходит под доменным аккаунтом (socials@) и его
+  // автоматически впускают без зала ожидания. Требует патча scripts/patch_vexa_auth.py
+  // и профиля в vexa-lite:/master-profile. Если cookies не подойдут — бот сам
+  // откатывается на анонимный "Ask to join" (см. join.ts), т.е. деградация мягкая.
+  if (process.env.BOT_AUTHENTICATED === "true") {
+    body.authenticated = true;
+  }
   const res = await vexaFetch("/bots", {
     method: "POST",
     body: JSON.stringify(body),
