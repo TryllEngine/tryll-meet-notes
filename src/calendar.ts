@@ -47,8 +47,8 @@ function calendarIds(): string[] {
  * Общие миты дедуплицируются по коду Meet-ссылки — бот зайдёт один раз.
  */
 export async function upcomingMeetings(
-  lookbackMin = 10,
-  lookaheadMin = 5,
+  lookbackMin = 12,
+  lookaheadMin = 7,
 ): Promise<UpcomingMeeting[]> {
   const cal = google.calendar({ version: "v3", auth: googleAuth() });
   const now = Date.now();
@@ -81,9 +81,10 @@ export async function upcomingMeetings(
     const nativeId = extractMeetCode(ev);
     if (!nativeId) continue; // нет ссылки на Meet — не созвон
     const startMs = Date.parse(ev.start.dateTime);
-    // отправляем бота через ~20 сек после начала мита: к этому моменту в звонке
-    // обычно уже есть человек, который впустит бота из зала ожидания
-    if (now < startMs + 20_000) continue;
+    // отправляем бота за 5 минут до старта (Chrome грузится небыстро) — бот
+    // встаёт в зал ожидания заранее и ждёт впуска до 15 мин (см. vexa.ts:
+    // max_wait_for_admission). Итого окно впуска: 5 мин до старта + 10 мин после.
+    if (now < startMs - 5 * 60_000) continue;
     if (seenNative.has(nativeId)) continue; // общий мит двух календарей — один бот
     seenNative.add(nativeId);
     out.push({
