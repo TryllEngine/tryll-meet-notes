@@ -27,7 +27,7 @@ export async function requestBot(nativeId: string): Promise<void> {
     automatic_leave: {
       max_wait_for_admission: 15 * 60_000, // 15 мин ждёт впуска из зала ожидания
       no_one_joined_timeout: 5 * 60_000, // 5 мин если в мите никого
-      max_time_left_alone: 10 * 60_000, // 10 мин если все вышли, а бот один
+      max_time_left_alone: 3 * 60_000, // 3 мин если все вышли, а бот один
     },
   };
   // Логотип в виртуальной камере бота (требует патча cameraEnabled в meeting-api,
