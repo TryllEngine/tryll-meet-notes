@@ -43,20 +43,37 @@ REPLACE_LEAVE = "    if (false /* tryll no-s3 */ && currentBotConfig?.authentica
 src = io.open(PATH, encoding="utf-8").read()
 
 if "tryll local profile" in src:
-    print("already patched")
-    sys.exit(0)
-
-if ANCHOR_LAUNCH not in src:
+    print("index.js: already patched")
+elif ANCHOR_LAUNCH not in src:
     print("ERROR: launch anchor not found — версия Vexa изменилась, патч обновить вручную")
     sys.exit(1)
-
-src = src.replace(ANCHOR_LAUNCH, REPLACE_LAUNCH)
-
-if ANCHOR_LEAVE in src:
-    src = src.replace(ANCHOR_LEAVE, REPLACE_LEAVE)
-    print("leave-sync disabled")
 else:
-    print("WARN: leave anchor not found (S3 upload on leave may error, non-fatal)")
+    src = src.replace(ANCHOR_LAUNCH, REPLACE_LAUNCH)
+    if ANCHOR_LEAVE in src:
+        src = src.replace(ANCHOR_LEAVE, REPLACE_LEAVE)
+        print("index.js: leave-sync disabled")
+    else:
+        print("index.js: WARN leave anchor not found (non-fatal)")
+    io.open(PATH, "w", encoding="utf-8").write(src)
+    print("index.js: patched -> local /master-profile + per-bot copy")
 
-io.open(PATH, "w", encoding="utf-8").write(src)
-print("patched: authenticated -> local /master-profile + per-bot copy")
+# --- join.js: убрать анонимный fallback в authenticated-режиме ---
+# Если cookies не подхватились (виден 'Ask to join'), бот НЕ заходит анонимно,
+# а уходит с ошибкой — чтобы не было постороннего "Tryll Notes Bot" в звонке.
+JOIN_PATH = "/app/vexa-bot/dist/platforms/googlemeet/join.js"
+ANCHOR_FALLBACK = (
+    '                await clickHandle(joinButton.el, "ask_to_join");\n'
+    "                (0, utils_1.log)(`Bot joined Google Meet via fallback (Ask to join).`);"
+)
+REPLACE_FALLBACK = (
+    '                throw new Error("tryll: auth cookies not loaded — refusing anonymous fallback"); /* tryll no-anon-fallback */'
+)
+jsrc = io.open(JOIN_PATH, encoding="utf-8").read()
+if "tryll no-anon-fallback" in jsrc:
+    print("join.js: already patched")
+elif ANCHOR_FALLBACK not in jsrc:
+    print("join.js: WARN fallback anchor not found — проверить вручную")
+else:
+    jsrc = jsrc.replace(ANCHOR_FALLBACK, REPLACE_FALLBACK)
+    io.open(JOIN_PATH, "w", encoding="utf-8").write(jsrc)
+    print("join.js: anonymous fallback disabled")
