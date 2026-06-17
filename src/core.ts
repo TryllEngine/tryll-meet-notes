@@ -61,15 +61,11 @@ async function collectFinished(log: string[]): Promise<void> {
       continue;
     }
     const now = Date.now();
-    const endMs = Date.parse(m.endISO);
     const botRunning = running.has(m.nativeId);
 
-    // страховка: встреча затянулась на 30+ минут сверх плана — останавливаем бота
-    if (botRunning && now > endMs + 30 * 60_000) {
-      await stopBot(m.nativeId);
-      log.push(`bot force-stopped (overtime): ${m.title}`);
-      continue; // транскрипт заберём на следующем тике
-    }
+    // Пока участники на месте — бот сам в звонке (выйдет по своей логике:
+    // 1 мин в одиночестве / no_one_joined / 2ч max_bot_time). Принудительно
+    // по расписанию НЕ выгоняем: мит может идти дольше запланированного времени.
     if (botRunning) {
       if (m.botGoneAtISO) {
         m.botGoneAtISO = undefined; // бот вернулся/мигнул статус — сброс грейса

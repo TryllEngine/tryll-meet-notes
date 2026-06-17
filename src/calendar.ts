@@ -82,9 +82,12 @@ export async function upcomingMeetings(
     const nativeId = extractMeetCode(ev);
     if (!nativeId) continue; // нет ссылки на Meet — не созвон
     const startMs = Date.parse(ev.start.dateTime);
-    // отправляем бота за 5 минут до старта (Chrome грузится небыстро) — бот
-    // встаёт в зал ожидания заранее и ждёт впуска до 15 мин (см. vexa.ts:
-    // max_wait_for_admission). Итого окно впуска: 5 мин до старта + 10 мин после.
+    const endMs = Date.parse(ev.end.dateTime);
+    // мит уже закончился по календарю — бота не шлём (защита от ре-диспатча
+    // на старые миты после пересборки раннера; идущие дольше плана не трогаем,
+    // т.к. их eventId уже в активных и сюда не попадёт)
+    if (now > endMs) continue;
+    // отправляем бота за 5 минут до старта (Chrome грузится небыстро)
     if (now < startMs - 5 * 60_000) continue;
     if (seenNative.has(nativeId)) continue; // общий мит двух календарей — один бот
     seenNative.add(nativeId);

@@ -25,9 +25,9 @@ export async function requestBot(nativeId: string): Promise<void> {
     bot_name: process.env.BOT_NAME || "Tryll Notes Bot",
     // Таймауты (мс): сколько ждать впуска / при пустом мите / в одиночестве
     automatic_leave: {
-      max_wait_for_admission: 15 * 60_000, // 15 мин ждёт впуска из зала ожидания
-      no_one_joined_timeout: 5 * 60_000, // 5 мин если в мите никого
-      max_time_left_alone: 1 * 60_000, // 1 мин если все вышли, а бот один (быстрее заметки)
+      max_wait_for_admission: 10 * 60_000, // 10 мин ждёт впуска
+      no_one_joined_timeout: 10 * 60_000, // 10 мин если в мите никого (5 до старта + 5 после) → выходит, заметок нет
+      max_time_left_alone: 1 * 60_000, // 1 мин если все вышли, а бот один → выходит и делает заметки
     },
   };
   // Логотип в виртуальной камере бота (требует патча cameraEnabled в meeting-api,
