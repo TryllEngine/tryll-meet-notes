@@ -22,7 +22,7 @@ export async function buildNotesDocx(
   transcript: string,
 ): Promise<Buffer> {
   const children: Paragraph[] = [
-    new Paragraph({ text: `${title} — ${dateISO.slice(0, 10)}`, heading: HeadingLevel.HEADING_1 }),
+    new Paragraph({ text: `${title} - ${dateISO.slice(0, 10)}`, heading: HeadingLevel.HEADING_1 }),
   ];
 
   children.push(heading("TL;DR"));

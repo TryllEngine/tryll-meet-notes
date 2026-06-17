@@ -23,6 +23,8 @@ export interface MeetingRecord {
   noteDocUrl?: string;
   /** когда заметили, что бот вышел из звонка (грейс перед сбором транскрипта) */
   botGoneAtISO?: string;
+  /** email-адреса приглашённых (для рассылки заметок участникам домена) */
+  attendees?: string[];
 }
 
 const ACTIVE = "meetings:active";

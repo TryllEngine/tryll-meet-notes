@@ -22,10 +22,10 @@ export function notesEmailHtml(title: string, dateISO: string, docUrl: string): 
   // <br><br><br> = две пустые строки между блоками (как просил Максим)
   return (
     `Hi team,<br><br><br>` +
-    `The meeting "${title}" (${date}) has wrapped up. The notes — summary, key decisions and action items — are ready here:<br>` +
-    `📄 <a href="${docUrl}">${docUrl}</a><br>` +
-    `This is an automated recap shared for your awareness. No reply needed.<br>` +
-    `<i>Sent automatically by Tryll Meeting Notes</i><br><br><br>` +
+    `The meeting "${title}" (${date}) has wrapped up.<br>` +
+    `The notes - summary, key decisions and action items - are ready here:<br>` +
+    `📄 <a href="${docUrl}">View meeting notes</a><br>` +
+    `<i>Sent automatically by Tryll Meeting Notes. No reply needed.</i><br><br><br>` +
     signatureHtml()
   );
 }
@@ -72,7 +72,7 @@ export async function sendNotesEmail(
 ): Promise<void> {
   if (recipients.length === 0) return;
   const gmail = google.gmail({ version: "v1", auth: googleAuth() });
-  const subject = `Meeting notes — ${title} (${dateISO.slice(0, 10)})`;
+  const subject = `Meeting notes - ${title} (${dateISO.slice(0, 10)})`;
   const html = notesEmailHtml(title, dateISO, docUrl);
   const raw = buildRawMessage(recipients.join(", "), subject, html);
   await gmail.users.messages.send({ userId: "me", requestBody: { raw } });

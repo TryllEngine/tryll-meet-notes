@@ -9,6 +9,7 @@ export interface UpcomingMeeting {
   seriesKey: string;
   seriesName: string;
   nativeId: string; // google meet code: abc-defg-hij
+  attendees: string[]; // email-адреса приглашённых (для рассылки заметок)
 }
 
 const MEET_CODE_RE = /meet\.google\.com\/([a-z]{3}-[a-z]{4}-[a-z]{3})/i;
@@ -87,6 +88,9 @@ export async function upcomingMeetings(
     if (now < startMs - 5 * 60_000) continue;
     if (seenNative.has(nativeId)) continue; // общий мит двух календарей — один бот
     seenNative.add(nativeId);
+    const attendees = (ev.attendees ?? [])
+      .map((a) => a.email ?? "")
+      .filter((e) => e && !e.endsWith(".calendar.google.com")); // исключаем room-ресурсы
     out.push({
       eventId: ev.id,
       title,
@@ -95,6 +99,7 @@ export async function upcomingMeetings(
       seriesKey: ev.recurringEventId ?? ev.id,
       seriesName: ev.recurringEventId ? title : "Разовые встречи",
       nativeId,
+      attendees,
     });
   }
   return out;
