@@ -4,6 +4,7 @@ import { googleAuth } from "./google";
 
 const FOLDER_MIME = "application/vnd.google-apps.folder";
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const GDOC_MIME = "application/vnd.google-apps.document"; // нативный Google Doc
 
 function driveClient() {
   return google.drive({ version: "v3", auth: googleAuth() });
@@ -71,8 +72,9 @@ async function ensureSeriesFolder(rootId: string, seriesName: string): Promise<s
 }
 
 /**
- * Кладёт .docx в "<корень>/<папка серии>/<fileName>.docx".
- * Возвращает webViewLink документа.
+ * Кладёт заметки в "<корень>/<папка серии>/<fileName>" как НАТИВНЫЙ Google Doc.
+ * Загружаем .docx-байты, а Drive конвертирует их в Google Doc (mimeType цели =
+ * google-apps.document). Возвращает ссылку на документ.
  */
 export async function uploadNotesDocx(
   seriesName: string,
@@ -85,16 +87,16 @@ export async function uploadNotesDocx(
   const drive = driveClient();
   const res = await drive.files.create({
     requestBody: {
-      name: `${fileName}.docx`,
+      name: fileName, // без .docx — это будет Google Doc
       parents: [seriesId],
-      mimeType: DOCX_MIME,
+      mimeType: GDOC_MIME, // цель — нативный Google Doc → Drive сконвертирует
     },
     media: {
-      mimeType: DOCX_MIME,
+      mimeType: DOCX_MIME, // исходные байты — .docx
       body: Readable.from(docx),
     },
     fields: "id, webViewLink",
     supportsAllDrives: true,
   });
-  return res.data.webViewLink ?? `https://drive.google.com/file/d/${res.data.id}/view`;
+  return res.data.webViewLink ?? `https://docs.google.com/document/d/${res.data.id}/edit`;
 }
