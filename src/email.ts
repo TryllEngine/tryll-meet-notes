@@ -24,8 +24,8 @@ export function notesEmailHtml(title: string, dateISO: string, docUrl: string): 
     `Hi team,<br><br><br>` +
     `The meeting "${title}" (${date}) has wrapped up. The notes — summary, key decisions and action items — are ready here:<br>` +
     `📄 <a href="${docUrl}">${docUrl}</a><br>` +
-    `This is an automated recap shared for your awareness. No reply needed.<br><br><br>` +
-    `Sent automatically by Tryll Meeting Notes<br><br><br>` +
+    `This is an automated recap shared for your awareness. No reply needed.<br>` +
+    `<i>Sent automatically by Tryll Meeting Notes</i><br><br><br>` +
     signatureHtml()
   );
 }
