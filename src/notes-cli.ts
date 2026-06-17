@@ -20,7 +20,13 @@ const CLI_INSTRUCTION = `${NOTES_SYSTEM}
   "open_questions": ["открытые вопросы"],
   "summary": "связный пересказ хода обсуждения на 2-5 абзацев, кто что предлагал"
 }
-ВАЖНО: title_en и tldr_en — ВСЕГДА на английском (для имени файла и письма), даже если весь мит на русском. Остальные поля (tldr, decisions, action_items, open_questions, summary) — на языке мита.`;
+ЯЗЫК (критично):
+1) Сначала определи ДОМИНИРУЮЩИЙ язык транскрипта (на каком языке реально говорили участники).
+2) Поля tldr, decisions, action_items, open_questions, summary пиши ИМЕННО на этом языке. Если транскрипт на английском — все эти поля на английском. Если на русском — на русском. НЕ переводи на русский только потому, что эта инструкция на русском.
+3) "language" — это код доминирующего языка ("en" или "ru").
+4) title_en и tldr_en — ВСЕГДА на английском (для имени файла и письма), даже если мит на русском.
+
+Пример: транскрипт целиком на английском → language="en", а tldr/decisions/summary и т.д. — на английском.`;
 
 function runClaude(args: string[], stdinText: string, timeoutMs: number): Promise<string> {
   return new Promise((resolve, reject) => {

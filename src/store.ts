@@ -1,4 +1,6 @@
 import { Redis } from "@upstash/redis";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { dirname } from "path";
 
 export type MeetingStatus =
   | "joining" // бот отправлен, созвон идёт
@@ -35,10 +37,51 @@ const hasRedis = Boolean(
 );
 const redis = hasRedis ? Redis.fromEnv() : null;
 
-// In-memory fallback для локального запуска (scripts/local.ts):
-// живёт, пока жив процесс — для прод-деплоя на Vercel нужен Upstash.
+// Файловый стор для локального/докер-запуска без Redis. КРИТИЧНО: переживает
+// рестарт контейнера — иначе раннер забывает, какие миты уже обработаны, и
+// шлёт ботов повторно (бот возвращается на мит после кика). Путь задаётся
+// STORE_FILE (в docker-compose смонтирован volume на /data).
+const STORE_FILE = process.env.STORE_FILE || "/data/store.json";
 const memMeetings = new Map<string, MeetingRecord>();
 const memSets = new Map<string, Set<string>>();
+let fileBroken = false; // если диск недоступен — деградируем в чистую память
+
+function loadFromDisk(): void {
+  if (redis) return;
+  try {
+    if (!existsSync(STORE_FILE)) return;
+    const raw = JSON.parse(readFileSync(STORE_FILE, "utf-8")) as {
+      meetings?: Record<string, MeetingRecord>;
+      sets?: Record<string, string[]>;
+    };
+    for (const [k, v] of Object.entries(raw.meetings ?? {})) memMeetings.set(k, v);
+    for (const [k, arr] of Object.entries(raw.sets ?? {})) memSets.set(k, new Set(arr));
+    console.log(
+      `store: загружено ${memMeetings.size} митов из ${STORE_FILE}`,
+    );
+  } catch (e) {
+    console.error(`store: не смог прочитать ${STORE_FILE}: ${e}`);
+  }
+}
+
+function persistToDisk(): void {
+  if (redis || fileBroken) return;
+  try {
+    const dir = dirname(STORE_FILE);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    const dump = {
+      meetings: Object.fromEntries(memMeetings),
+      sets: Object.fromEntries(
+        [...memSets].map(([k, s]) => [k, [...s]]),
+      ),
+    };
+    writeFileSync(STORE_FILE, JSON.stringify(dump), "utf-8");
+  } catch (e) {
+    fileBroken = true;
+    console.error(`store: не смог записать ${STORE_FILE}, работаю в памяти: ${e}`);
+  }
+}
+
 const memSet = (name: string) => {
   let s = memSets.get(name);
   if (!s) {
@@ -50,6 +93,8 @@ const memSet = (name: string) => {
 
 const key = (eventId: string) => `meeting:${eventId}`;
 
+loadFromDisk(); // поднимаем сохранённое состояние при старте процесса
+
 export async function getMeeting(eventId: string): Promise<MeetingRecord | null> {
   if (!redis) return memMeetings.get(eventId) ?? null;
   return (await redis.get<MeetingRecord>(key(eventId))) ?? null;
@@ -58,6 +103,7 @@ export async function getMeeting(eventId: string): Promise<MeetingRecord | null>
 export async function saveMeeting(m: MeetingRecord): Promise<void> {
   if (!redis) {
     memMeetings.set(m.eventId, m);
+    persistToDisk();
     return;
   }
   // храним 14 дней, чтобы dedup по eventId переживал повторные тики
@@ -67,6 +113,7 @@ export async function saveMeeting(m: MeetingRecord): Promise<void> {
 async function sadd(set: string, member: string): Promise<void> {
   if (!redis) {
     memSet(set).add(member);
+    persistToDisk();
     return;
   }
   await redis.sadd(set, member);
@@ -75,6 +122,7 @@ async function sadd(set: string, member: string): Promise<void> {
 async function srem(set: string, member: string): Promise<void> {
   if (!redis) {
     memSet(set).delete(member);
+    persistToDisk();
     return;
   }
   await redis.srem(set, member);

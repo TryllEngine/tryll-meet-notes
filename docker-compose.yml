@@ -14,8 +14,16 @@ services:
     environment:
       # внутри docker-сети Vexa доступна по имени контейнера, а не localhost
       VEXA_BASE_URL: http://vexa-lite:8056
+      # персистентный стор обработанных митов (переживает рестарт/пересборку),
+      # иначе бот возвращается на мит после кика
+      STORE_FILE: /data/store.json
+    volumes:
+      - runner-data:/data
     networks:
       - vexa-network
+
+volumes:
+  runner-data:
 
 networks:
   vexa-network:
