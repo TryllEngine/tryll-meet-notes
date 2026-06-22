@@ -1,132 +1,200 @@
 import { upcomingMeetings } from "./calendar";
-import { finalizeMeeting } from "./finalize";
+import { emailNotes, uploadNotes } from "./finalize";
 import { generateNotes, MeetingNotes } from "./notes";
 import { generateNotesViaCli } from "./notes-cli";
 import {
   getMeeting,
   listActive,
+  listPending,
   markActive,
   markPending,
-  MeetingRecord,
   saveMeeting,
   unmarkActive,
+  unmarkPending,
 } from "./store";
 import { getTranscript, requestBot, runningBots, stopBot } from "./vexa";
 
-/** Шаг 1: новые созвоны из календаря → отправить бота. */
-async function dispatchBots(log: string[]): Promise<void> {
-  const meetings = await upcomingMeetings();
-  if (meetings.length === 0) return;
+// Максимум одновременных ботов (слотов). По расчёту больше 3 митов разом не бывает.
+const MAX_CONCURRENT = Number(process.env.MAX_CONCURRENT_BOTS || 3);
+// Бот вышел: ждём, пока транскрипт перестанет расти (Whisper дообрабатывает хвост
+// аудио), но не дольше этого потолка. Справится раньше — соберём раньше.
+const WHISPER_MAX_GRACE_MS = Number(process.env.WHISPER_MAX_GRACE_MIN || 5) * 60_000;
+// Анти-призрак №1: говорили, потом транскрипт замер на столько → мит кончился/бот завис.
+const STALL_MS = Number(process.env.STALL_MIN || 6) * 60_000;
+// Анти-призрак №2: мит давно кончился по расписанию, а Vexa всё ещё держит бота
+// «running» (реально вышел/завис) → раннер сам добивает бота и собирает заметки.
+const FORCE_LEAVE_AFTER_END_MS = Number(process.env.FORCE_LEAVE_AFTER_END_MIN || 10) * 60_000;
 
-  // nativeId уже активных митов — общий мит из чужого календаря не дублируем
-  const activeNative = new Set<string>();
+const nowISO = () => new Date().toISOString();
+
+/** Транскрипт без падения тика: Vexa моргнула → null, попробуем в следующий раз. */
+async function safeTranscript(nativeId: string): Promise<string | null> {
+  try {
+    return await getTranscript(nativeId);
+  } catch {
+    return null;
+  }
+}
+
+/** Занятые слоты: реально бегущие боты + миты, помеченные активными. */
+async function usedSlots(running: Set<string>): Promise<Set<string>> {
+  const used = new Set(running);
   for (const id of await listActive()) {
     const rec = await getMeeting(id);
-    if (rec) activeNative.add(rec.nativeId);
+    if (rec) used.add(rec.nativeId);
   }
+  return used;
+}
+
+/** Шаг 1: новые созвоны из календаря → отправить бота (не больше MAX_CONCURRENT). */
+async function dispatchBots(log: string[], running: Set<string>): Promise<void> {
+  const meetings = await upcomingMeetings();
+  if (meetings.length === 0) return;
+  const used = await usedSlots(running);
 
   for (const m of meetings) {
-    const existing = await getMeeting(m.eventId);
-    if (existing) continue; // уже обработан/обрабатывается
-    if (activeNative.has(m.nativeId)) continue; // бот уже в этом звонке
-    const record: MeetingRecord = {
-      ...m,
-      platform: "google_meet",
-      status: "joining",
-    };
+    if (await getMeeting(m.eventId)) continue; // уже обработан/обрабатывается
+    if (used.has(m.nativeId)) continue; // бот уже в этом звонке (общий мит)
+    if (used.size >= MAX_CONCURRENT) {
+      log.push(`slot full (${used.size}/${MAX_CONCURRENT}), отложен: ${m.title}`);
+      continue; // лимит занят — повторим в следующий тик (мит ещё в окне календаря)
+    }
     try {
       await requestBot(m.nativeId);
-      await saveMeeting(record);
+      // Запись сохраняем ТОЛЬКО после успешного запроса. Транзиентная ошибка
+      // (сеть / Vexa перезапускается) НЕ маркируется навсегда — ретрай в след. тик.
+      await saveMeeting({ ...m, platform: "google_meet", status: "joining" });
       await markActive(m.eventId);
+      used.add(m.nativeId);
       log.push(`bot sent: ${m.title} (${m.nativeId})`);
     } catch (e) {
-      record.status = "failed";
-      record.error = String(e);
-      await saveMeeting(record);
-      log.push(`bot FAILED: ${m.title}: ${e}`);
+      log.push(`bot dispatch failed (retry next tick): ${m.title}: ${e}`);
     }
   }
 }
 
-/** Шаг 2: активные созвоны → если закончились, забрать транскрипт и сделать заметки. */
-async function collectFinished(log: string[]): Promise<void> {
-  const active = await listActive();
-  if (active.length === 0) return;
-  const running = await runningBots();
-
-  for (const eventId of active) {
+/**
+ * Шаг 2: следим за активными ботами. Пока транскрипт растёт — мит живой.
+ * Замер/конец/кик/призрак → добиваем бота (если надо) и забираем транскрипт.
+ * Гарантия отсутствия ботов-призраков: слот всегда освобождается.
+ */
+async function collectFinished(log: string[], running: Set<string>): Promise<void> {
+  for (const eventId of await listActive()) {
     const m = await getMeeting(eventId);
     if (!m) {
       await unmarkActive(eventId);
       continue;
     }
     const now = Date.now();
-    const botRunning = running.has(m.nativeId);
+    const startMs = Date.parse(m.startISO);
+    const endMs = Date.parse(m.endISO);
+    let botRunning = running.has(m.nativeId);
 
-    // Пока участники на месте — бот сам в звонке (выйдет по своей логике:
-    // 1 мин в одиночестве / no_one_joined / 2ч max_bot_time). Принудительно
-    // по расписанию НЕ выгоняем: мит может идти дольше запланированного времени.
     if (botRunning) {
-      if (m.botGoneAtISO) {
-        m.botGoneAtISO = undefined; // бот вернулся/мигнул статус — сброс грейса
+      const tr = await safeTranscript(m.nativeId);
+      const len = tr ? tr.length : 0;
+      if (len !== (m.lastTranscriptLen ?? -1)) {
+        // транскрипт растёт → мит реально идёт (даже если дольше расписания)
+        m.lastTranscriptLen = len;
+        m.lastProgressAtISO = nowISO();
+        if (m.botGoneAtISO) m.botGoneAtISO = undefined;
         await saveMeeting(m);
+        continue;
       }
-      continue; // созвон ещё идёт
+      // транскрипт не меняется — это пауза, конец мита или зависший бот-призрак
+      const hadContent = len > 0;
+      const stalledMs = now - Date.parse(m.lastProgressAtISO ?? nowISO());
+      const ghostByStall = hadContent && stalledMs > STALL_MS; // поговорили → тишина → конец
+      const ghostByEnd = now > endMs + FORCE_LEAVE_AFTER_END_MS; // расписание прошло, бот висит
+      if (ghostByStall || ghostByEnd) {
+        try {
+          await stopBot(m.nativeId);
+        } catch {
+          /* уже мёртв — ок */
+        }
+        log.push(`force-stop (${ghostByStall ? "stalled" : "overrun"}): ${m.title}`);
+        botRunning = false; // → собираем транскрипт ниже
+      } else {
+        continue; // короткая пауза в речи / мит ещё в расписании — ждём
+      }
     }
-    if (now < Date.parse(m.startISO) + 2 * 60_000) continue; // бот мог ещё не успеть зайти
 
-    // бот вышел: даём транскрипции 60 сек дообработать хвост аудио
+    // бот не в звонке (вышел сам по таймауту / кикнули / форс-стоп выше)
+    if (now < startMs + 2 * 60_000) continue; // мог ещё не успеть зайти
+
     if (!m.botGoneAtISO) {
-      m.botGoneAtISO = new Date(now).toISOString();
+      m.botGoneAtISO = nowISO();
+      await saveMeeting(m);
+      continue; // запускаем адаптивный грейс на дообработку Whisper
+    }
+    const elapsed = now - Date.parse(m.botGoneAtISO);
+    const tr = await safeTranscript(m.nativeId);
+    const len = tr ? tr.length : 0;
+    if (elapsed < WHISPER_MAX_GRACE_MS && len !== (m.lastTranscriptLen ?? -1)) {
+      m.lastTranscriptLen = len; // транскрипт ещё растёт — ждём (потолок 5 мин)
       await saveMeeting(m);
       continue;
     }
-    if (now < Date.parse(m.botGoneAtISO) + 60_000) continue;
 
-    const transcript = await getTranscript(m.nativeId);
-    if (!transcript) {
+    // транскрипт стабилен (Whisper доделал) либо вышел потолок грейса — собираем
+    if (!tr) {
       m.status = "failed";
-      m.error = "Транскрипт пуст: бота не впустили в звонок или никто не говорил";
+      m.error = "Транскрипт пуст: бота не впустили или никто не говорил";
       await saveMeeting(m);
       await unmarkActive(eventId);
       log.push(`no transcript: ${m.title}`);
       continue;
     }
-
-    m.transcript = transcript;
+    m.transcript = tr;
+    m.status = "awaiting_notes";
+    await saveMeeting(m);
     await unmarkActive(eventId);
+    await markPending(eventId); // заметки сделает processPending (с ретраями до успеха)
+    log.push(`transcript captured → notes pending: ${m.title}`);
+  }
+}
 
-    // Режим заметок: cli (локальный Claude Code по подписке) | api (ANTHROPIC_API_KEY) | queue
-    const mode =
-      process.env.NOTES_MODE ?? (process.env.ANTHROPIC_API_KEY ? "api" : "queue");
-
-    if (mode === "cli" || mode === "api") {
-      try {
+/**
+ * Шаг 3: для каждого мита с транскриптом — заметки → Drive → письмо.
+ * Гарантия «1 мит = 1 заметка = 1 письмо»: ретраит до успеха, идемпотентно
+ * (загрузка по m.noteDocUrl, письмо по m.emailedAt — повторно не делает).
+ */
+async function processPending(log: string[]): Promise<void> {
+  const mode = process.env.NOTES_MODE ?? (process.env.ANTHROPIC_API_KEY ? "api" : "cli");
+  for (const eventId of await listPending()) {
+    const m = await getMeeting(eventId);
+    if (!m || m.status === "done") {
+      await unmarkPending(eventId);
+      continue;
+    }
+    if (m.status !== "awaiting_notes" || !m.transcript) continue;
+    try {
+      if (!m.noteDocUrl) {
         const notes: MeetingNotes =
-          mode === "cli"
-            ? await generateNotesViaCli(m.title, m.startISO, transcript)
-            : await generateNotes(m.title, m.startISO, transcript);
-        const url = await finalizeMeeting(m, notes);
-        log.push(`done: ${m.title} → ${url}`);
-      } catch (e) {
-        m.status = "awaiting_notes";
-        m.error = `notes failed, queued for agent: ${e}`;
-        await saveMeeting(m);
-        await markPending(eventId);
-        log.push(`notes failed, queued: ${m.title}: ${e}`);
+          mode === "api"
+            ? await generateNotes(m.title, m.startISO, m.transcript)
+            : await generateNotesViaCli(m.title, m.startISO, m.transcript);
+        await uploadNotes(m, notes); // ставит noteDocUrl/titleEn/tldrEn, сохраняет
       }
-    } else {
-      // Путь B: в очередь для scheduled-агента Claude Code (подписка)
-      m.status = "awaiting_notes";
+      if (process.env.NOTES_EMAIL === "true" && !m.emailedAt) {
+        await emailNotes(m); // ставит emailedAt, сохраняет
+      }
+      m.status = "done";
+      m.transcript = undefined; // транскрипт после выгрузки не держим
       await saveMeeting(m);
-      await markPending(eventId);
-      log.push(`queued for agent: ${m.title}`);
+      await unmarkPending(eventId);
+      log.push(`done: ${m.title} → ${m.noteDocUrl}`);
+    } catch (e) {
+      // оставляем awaiting_notes + pending → следующий тик повторит (до успеха)
+      log.push(`notes retry (will try again): ${m.title}: ${e}`);
     }
   }
 }
 
-/** Один тик оркестратора: отправить ботов + собрать завершённые созвоны. */
+/** Один тик оркестратора: отправить ботов + собрать завершённые + дожать заметки. */
 export async function runTick(log: string[]): Promise<void> {
-  await dispatchBots(log);
-  await collectFinished(log);
+  const running = await runningBots();
+  await dispatchBots(log, running);
+  await collectFinished(log, running);
+  await processPending(log);
 }
