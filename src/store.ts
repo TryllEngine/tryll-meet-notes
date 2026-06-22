@@ -1,5 +1,5 @@
 import { Redis } from "@upstash/redis";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "fs";
 import { dirname } from "path";
 
 export type MeetingStatus =
@@ -27,6 +27,16 @@ export interface MeetingRecord {
   botGoneAtISO?: string;
   /** email-адреса приглашённых (для рассылки заметок участникам домена) */
   attendees?: string[];
+  /** длина последнего прочитанного транскрипта — чтобы понять, растёт ли он
+   *  (живой мит) или замер (бот вышел/завис → пора собирать/добивать) */
+  lastTranscriptLen?: number;
+  /** когда транскрипт в последний раз менялся (для детекта «завис/закончился») */
+  lastProgressAtISO?: string;
+  /** английские поля заметки — сохраняем, чтобы письмо ретраить без перегенерации */
+  titleEn?: string;
+  tldrEn?: string[];
+  /** когда письмо ушло (идемпотентность: одно письмо на мит) */
+  emailedAt?: string;
 }
 
 const ACTIVE = "meetings:active";
@@ -75,7 +85,12 @@ function persistToDisk(): void {
         [...memSets].map(([k, s]) => [k, [...s]]),
       ),
     };
-    writeFileSync(STORE_FILE, JSON.stringify(dump), "utf-8");
+    // Атомарно: пишем во временный файл и переименовываем. rename внутри одной
+    // ФС атомарен — даже если процесс упадёт посреди записи, store.json останется
+    // целым (либо старая версия, либо новая), а не битым обрезком.
+    const tmp = `${STORE_FILE}.tmp`;
+    writeFileSync(tmp, JSON.stringify(dump), "utf-8");
+    renameSync(tmp, STORE_FILE);
   } catch (e) {
     fileBroken = true;
     console.error(`store: не смог записать ${STORE_FILE}, работаю в памяти: ${e}`);
