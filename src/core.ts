@@ -19,13 +19,13 @@ const MAX_CONCURRENT = Number(process.env.MAX_CONCURRENT_BOTS || 3);
 // Бот вышел: ждём, пока транскрипт перестанет расти (Whisper дообрабатывает хвост
 // аудио), но не дольше этого потолка. Справится раньше — соберём раньше.
 const WHISPER_MAX_GRACE_MS = Number(process.env.WHISPER_MAX_GRACE_MIN || 5) * 60_000;
-// Анти-призрак №1: говорили, потом транскрипт замер на столько → мит кончился/бот
-// завис. 10 мин полной тишины — это уже конец, а не пауза (живой мит растит
-// транскрипт и идёт по ветке «растёт» выше, его это не трогает).
-const STALL_MS = Number(process.env.STALL_MIN || 10) * 60_000;
-// Анти-призрак №2: мит давно кончился по расписанию, а Vexa всё ещё держит бота
-// «running» (реально вышел/завис) → раннер сам добивает бота и собирает заметки.
-const FORCE_LEAVE_AFTER_END_MS = Number(process.env.FORCE_LEAVE_AFTER_END_MIN || 10) * 60_000;
+// Анти-призрак по ПРИСУТСТВИЮ, а не по тишине: пока бот пишет аудио-чанки (даже
+// в полной тишине) — мит живой, не трогаем. Если чанки застыли на столько — бот
+// реально вышел/завис (Vexa врёт running) → добиваем и собираем заметки.
+const GHOST_NO_AUDIO_MS = Number(process.env.GHOST_NO_AUDIO_MIN || 3) * 60_000;
+// Дальний предохранитель: бот живёт дольше любого реального мита (> его же лимита
+// max_bot_time ~2ч) → точно зависший призрак, добиваем.
+const HARD_MAX_MS = Number(process.env.HARD_MAX_MIN || 150) * 60_000;
 
 // Момент запуска (пробуждения) раннера. У нас нет 24/7 сервера: включил ПК →
 // поднял Docker → раннер ожил. Если в этот момент уже идёт мит, начавшийся ДО
@@ -48,8 +48,8 @@ async function safeTranscript(nativeId: string): Promise<string | null> {
 }
 
 /** Занятые слоты: реально бегущие боты + миты, помеченные активными. */
-async function usedSlots(running: Set<string>): Promise<Set<string>> {
-  const used = new Set(running);
+async function usedSlots(running: Map<string, number>): Promise<Set<string>> {
+  const used = new Set<string>(running.keys());
   for (const id of await listActive()) {
     const rec = await getMeeting(id);
     if (rec) used.add(rec.nativeId);
@@ -58,7 +58,7 @@ async function usedSlots(running: Set<string>): Promise<Set<string>> {
 }
 
 /** Шаг 1: новые созвоны из календаря → отправить бота (не больше MAX_CONCURRENT). */
-async function dispatchBots(log: string[], running: Set<string>): Promise<void> {
+async function dispatchBots(log: string[], running: Map<string, number>): Promise<void> {
   const meetings = await upcomingMeetings();
   if (meetings.length === 0) return;
   const used = await usedSlots(running);
@@ -104,7 +104,7 @@ async function dispatchBots(log: string[], running: Set<string>): Promise<void> 
  * Замер/конец/кик/призрак → добиваем бота (если надо) и забираем транскрипт.
  * Гарантия отсутствия ботов-призраков: слот всегда освобождается.
  */
-async function collectFinished(log: string[], running: Set<string>): Promise<void> {
+async function collectFinished(log: string[], running: Map<string, number>): Promise<void> {
   for (const eventId of await listActive()) {
     const m = await getMeeting(eventId);
     if (!m) {
@@ -113,35 +113,39 @@ async function collectFinished(log: string[], running: Set<string>): Promise<voi
     }
     const now = Date.now();
     const startMs = Date.parse(m.startISO);
-    const endMs = Date.parse(m.endISO);
     let botRunning = running.has(m.nativeId);
 
     if (botRunning) {
+      // Транскрипт читаем только для адаптивного грейса (ниже). Решение «мит
+      // живой или нет» принимаем по ПРИСУТСТВИЮ: пока бот пишет аудио-чанки —
+      // люди в мите (даже если молчат), не трогаем. ТИШИНА НЕ ПОВОД ВЫХОДИТЬ.
       const tr = await safeTranscript(m.nativeId);
       const len = tr ? tr.length : 0;
+      let changed = false;
       if (len !== (m.lastTranscriptLen ?? -1)) {
-        // транскрипт растёт → мит реально идёт (даже если дольше расписания)
         m.lastTranscriptLen = len;
         m.lastProgressAtISO = nowISO();
-        if (m.botGoneAtISO) m.botGoneAtISO = undefined;
-        await saveMeeting(m);
-        continue;
+        changed = true;
       }
-      // транскрипт не меняется — это пауза, конец мита или зависший бот-призрак
-      const hadContent = len > 0;
-      const stalledMs = now - Date.parse(m.lastProgressAtISO ?? nowISO());
-      const ghostByStall = hadContent && stalledMs > STALL_MS; // поговорили → тишина → конец
-      const ghostByEnd = now > endMs + FORCE_LEAVE_AFTER_END_MS; // расписание прошло, бот висит
-      if (ghostByStall || ghostByEnd) {
+      if (m.botGoneAtISO) {
+        m.botGoneAtISO = undefined;
+        changed = true;
+      }
+
+      const lastAudioMs = running.get(m.nativeId) ?? 0;
+      const audioStale = lastAudioMs > 0 && now - lastAudioMs > GHOST_NO_AUDIO_MS; // бот-призрак
+      const hardCap = now > startMs + HARD_MAX_MS; // дальний предохранитель
+      if (audioStale || hardCap) {
         try {
           await stopBot(m.nativeId);
         } catch {
           /* уже мёртв — ок */
         }
-        log.push(`force-stop (${ghostByStall ? "stalled" : "overrun"}): ${m.title}`);
+        log.push(`force-stop (${audioStale ? "no audio — ghost" : "hard cap"}): ${m.title}`);
         botRunning = false; // → собираем транскрипт ниже
       } else {
-        continue; // короткая пауза в речи / мит ещё в расписании — ждём
+        if (changed) await saveMeeting(m);
+        continue; // бот пишет аудио → мит живой (даже в тишине), ждём
       }
     }
 

@@ -62,15 +62,38 @@ export async function stopBot(nativeId: string): Promise<void> {
   await vexaFetch(`/bots/google_meet/${nativeId}`, { method: "DELETE" });
 }
 
-/** native_meeting_id всех ботов, которые сейчас в звонках */
-export async function runningBots(): Promise<Set<string>> {
+interface BotStatusEntry {
+  native_meeting_id?: string;
+  meeting_id?: string;
+  data?: { recordings?: Array<{ media_files?: Array<{ created_at?: string }> }> };
+}
+
+/**
+ * Карта: native_meeting_id → epoch-мс последнего записанного аудио-чанка.
+ * Ключи = боты, которых Vexa считает «в звонке». Значение — «свежесть» аудио:
+ * живой бот пишет чанки даже в ПОЛНОЙ ТИШИНЕ, поэтому свежий чанк = бот реально
+ * в мите (молчат — не значит ушли). Застывший чанк = бот вышел/завис, даже если
+ * Vexa ещё держит его в статусе running (защита от ботов-призраков). 0 — чанков
+ * ещё нет (бот только зашёл / запись не началась).
+ */
+export async function runningBots(): Promise<Map<string, number>> {
   const res = await vexaFetch("/bots/status");
   if (!res.ok) throw new Error(`Vexa runningBots ${res.status}`);
-  const data = (await res.json()) as { running_bots?: Array<{ native_meeting_id?: string; meeting_id?: string }> };
-  const ids = (data.running_bots ?? [])
-    .map((b) => b.native_meeting_id ?? b.meeting_id)
-    .filter((x): x is string => Boolean(x));
-  return new Set(ids);
+  const data = (await res.json()) as { running_bots?: BotStatusEntry[] };
+  const out = new Map<string, number>();
+  for (const b of data.running_bots ?? []) {
+    const nid = b.native_meeting_id ?? b.meeting_id;
+    if (!nid) continue;
+    let latest = 0;
+    for (const rec of b.data?.recordings ?? []) {
+      for (const mf of rec.media_files ?? []) {
+        const t = Date.parse(mf.created_at ?? "");
+        if (!Number.isNaN(t) && t > latest) latest = t;
+      }
+    }
+    out.set(nid, latest);
+  }
+  return out;
 }
 
 interface TranscriptSegment {
