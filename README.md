@@ -1,88 +1,123 @@
 # Tryll Meet Notes
 
-Бот для созвонов компании Tryll Engine: следит за Google Calendar, в момент начала созвона автоматически отправляет бота в Google Meet, транскрибирует разговор **с именами спикеров**, генерирует заметки через **Claude Sonnet** и складывает готовый **.docx** на Google Drive в структуру папок:
+Calendar-driven meeting-notes automation. It watches Google Calendar, sends a
+bot into each Google Meet call, transcribes the conversation **with speaker
+names**, generates structured notes with **Claude**, saves them as a native
+**Google Doc** on Google Drive, and emails a branded summary card to the
+company's participants.
+
+Everything runs locally in Docker on a workstation — no dedicated 24/7 server
+required. The stack comes alive when Docker is started and processes meetings on
+its own.
 
 ```
-Tryll Meeting Notes/
-├── Sync Tryll/                  ← папка = серия повторяющегося события
-│   └── Sync Tryll — 2026-06-10.docx
-└── Разовые встречи/
-    └── Созвон с партнёром — 2026-06-08.docx
+Google Calendar ──▶ tryll-runner (orchestrator, tick every 30s)
+                        │  1. dispatch a bot 5 min before start
+                        ▼
+                    Vexa (self-hosted) ──▶ joins Google Meet, records audio,
+                        │                   captures speaker names
+                        ▼
+                    Whisper (self-hosted, GPU) ──▶ transcript "Name: line"
+                        │
+                        ▼
+                    Claude (CLI on subscription, or API) ──▶ notes JSON
+                        │
+                        ▼
+                    Google Drive (native Google Doc) + Gmail (summary card)
 ```
 
-## Архитектура
+## How it works
 
-```
-Vercel (мозг, serverless)                 Vexa (тело бота)
-┌─────────────────────────────┐           ┌──────────────────────┐
-│ /api/tick  (cron, раз в мин)│──POST────▶│ бот заходит в Meet,  │
-│  1. календарь → новые миты  │   /bots   │ пишет звук, Whisper, │
-│  2. отправить бота          │◀──────────│ спикеры из UI Meet   │
-│  3. созвон кончился →       │ transcript└──────────────────────┘
-│     транскрипт → заметки    │
-│     (Claude Sonnet) →       │──────────▶ Google Drive (.docx)
-│     .docx → Drive           │
-│ /api/pending (для агента)   │
-└─────────────────────────────┘
-   состояние: Upstash Redis
-```
+The orchestrator (`src/core.ts`) runs one tick every 30 seconds, in three steps:
 
-- **Почему бот не на Vercel:** serverless-функции живут минуты и не умеют держать headless-браузер с аудио 60+ минут. Бот — это [Vexa](https://vexa.ai) (open source, Apache 2.0): либо их облако (`https://api.cloud.vexa.ai`, ~$0.50/час звонка), либо self-hosted на сервере Tryll (`docker compose up`, бесплатно). Код одинаковый — меняется `VEXA_BASE_URL`.
-- **Заметки — два пути:**
-  - **Путь A** (если задан `ANTHROPIC_API_KEY`): `/api/tick` сам вызывает Claude Sonnet (`claude-sonnet-4-6`) и сразу собирает docx.
-  - **Путь B** (без API-ключа, на подписке Claude): транскрипты копятся в очереди, а **scheduled-агент Claude Code** (работает в облаке по твоей подписке) периодически забирает их через `GET /api/pending`, пишет заметки и возвращает `POST /api/pending` — сервер сам собирает docx и грузит на Drive.
+1. **Dispatch** — reads upcoming meetings from Google Calendar and sends a Vexa
+   bot **5 minutes before** each meeting starts. At most `MAX_CONCURRENT_BOTS`
+   (default 3) run at once; extra meetings wait for a free slot.
+2. **Collect** — watches every active bot. While the transcript keeps growing the
+   meeting is live (longer-than-scheduled calls are fine). When it stalls / ends /
+   the bot is kicked, the transcript is captured. If the bot is stuck or the
+   meeting platform falsely reports it as still running, the runner force-stops it
+   so a slot is **always** freed (no "ghost" bots).
+3. **Notes** — turns each transcript into notes with Claude, uploads them as a
+   native Google Doc, and emails the summary card. This is idempotent and
+   retried until it succeeds: **exactly one document and one email per meeting**,
+   and it survives a restart.
 
-## Развёртывание
+### Bot lifecycle
 
-### 1. Vexa
+- Joins **5 min before** the scheduled start. Using a company Google account it
+  is **auto-admitted** (no waiting room).
+- **Nobody joins within 10 min** → leaves, no transcript, no notes, frees the slot.
+- **Everyone leaves** and the bot is alone for **3 min** → leaves and produces notes.
+- **Kicked** → leaves immediately, frees the slot, writes notes from whatever was
+  captured, and does not rejoin that meeting.
+- **Startup-skip** — because there is no 24/7 server, if the runner wakes up
+  (Docker just started) and a meeting is **already running for more than
+  `STARTUP_SKIP_MIN`** (default 5), it is skipped — the bot won't join near the end.
 
-Вариант «облако»: зарегистрируйся на [vexa.ai](https://vexa.ai), получи API key.
-Вариант «свой сервер»: `git clone https://github.com/Vexa-ai/vexa && docker compose up -d`, затем `VEXA_BASE_URL=http://<сервер>:18056`.
+### Notes & email
 
-> ⚠️ Эндпоинты Vexa в `src/vexa.ts` (`POST /bots`, `GET /transcripts/...`, `GET /bots/status`) сверь с документацией той версии Vexa, которую развернёшь — API у них активно развивается.
+- Notes body is written in the **meeting's language**; the file name and the
+  email TL;DR are always in **English**.
+- Sections: TL;DR, decisions, action items (`owner → task → due`), open
+  questions, a discussion summary, and the full transcript.
+- Saved to Drive as a native Google Doc:
+  `Root / <series folder> / <Title> - <YYYY-MM-DD>`.
+- The email is a branded HTML card (logo, "Open meeting notes" button, English
+  TL;DR, signature). It is sent **only to attendees on the company domain** —
+  external guests are never emailed.
 
-### 2. Google (Calendar + Drive)
+### State
 
-1. [Google Cloud Console](https://console.cloud.google.com) → новый проект → включи **Google Calendar API** и **Google Drive API**.
-2. OAuth consent screen (Internal для Workspace) → Credentials → **OAuth Client ID** (Desktop app).
-3. Получи refresh token со scope `https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/drive.file` (через [OAuth Playground](https://developers.google.com/oauthplayground): шестерёнка → Use your own OAuth credentials).
-4. Заполни `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`.
+Processed meetings are tracked in a small persistent store
+(`/data/store.json` on a Docker volume, written atomically). This survives
+restarts, so a bot never re-joins a meeting it already handled. Upstash Redis is
+used instead if its environment variables are set.
 
-### 3. Upstash Redis (состояние)
+## Components
 
-Vercel Dashboard → Storage → Marketplace → **Upstash Redis** (free tier). Переменные `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` подключатся к проекту автоматически.
+| Container | Role |
+|-----------|------|
+| `tryll-runner` | Orchestrator (this repo): calendar → bot → transcript → notes → Drive → email |
+| `vexa-lite` + `vexa-postgres` | [Vexa](https://github.com/Vexa-ai/vexa) self-hosted meeting bot (joins Meet, records) |
+| `transcription-lb` + workers | Self-hosted Whisper (`large-v3-turbo`, GPU) |
 
-### 4. Vercel
+The runner is a small TypeScript app run directly with `tsx` (no build step):
 
-1. Импортируй репозиторий на [vercel.com/new](https://vercel.com/new).
-2. Задай переменные окружения из `.env.example`.
-3. **Cron:** `vercel.json` уже содержит cron `* * * * *` для `/api/tick`. На плане **Pro** он заработает сразу. На **Hobby** cron ограничен (раз в день) — вместо него заведи бесплатный пингер [cron-job.org](https://cron-job.org), дёргающий `https://<проект>.vercel.app/api/tick?secret=<CRON_SECRET>` каждую минуту.
+- `src/calendar.ts` — Google Calendar polling, Meet-code dedup, attendees
+- `src/vexa.ts` — Vexa REST client (request bot, status, transcript, stop) + leave timeouts
+- `src/core.ts` — the orchestrator (dispatch / collect / notes)
+- `src/notes.ts`, `src/notes-cli.ts` — notes generation (Claude API / Claude CLI)
+- `src/docx.ts`, `src/drive.ts` — document build + Drive upload (Google Doc)
+- `src/email.ts`, `src/finalize.ts` — summary email + idempotent finalize
+- `src/store.ts` — persistent state
 
-### 5. Заметки
+Vexa runs with small local patches (`scripts/patch_*`): authenticated join under
+a domain profile, an avatar camera, and robust leave detection.
 
-- **Путь A:** добавь `ANTHROPIC_API_KEY` — и всё работает само.
-- **Путь B (подписка):** в Claude Code выполни `/schedule` и создай агента с расписанием «каждый час» и промптом вида:
+## Configuration
 
-  > Сделай GET https://<проект>.vercel.app/api/pending с заголовком `Authorization: Bearer <AGENT_SECRET>`. Для каждого item напиши заметки по транскрипту (язык созвона; TL;DR, решения, action items «кто→что→срок», открытые вопросы, связный пересказ) и отправь POST на тот же URL с JSON `{"eventId": ..., "notes": {language, tldr[], decisions[], action_items[{owner,task,due}], open_questions[], summary}}` с тем же заголовком.
+Copy `.env.example` to `.env` and fill it in. Key variables:
 
-## Поведение
+| Variable | Purpose |
+|----------|---------|
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REFRESH_TOKEN` | Google OAuth (Calendar read, Drive, Gmail send) |
+| `GOOGLE_CALENDAR_IDS` | Calendars to watch (comma-separated; default `primary`) |
+| `VEXA_BASE_URL` / `VEXA_API_KEY` | Vexa endpoint and key |
+| `BOT_AUTHENTICATED` / `BOT_AVATAR_URL` | Domain auto-admit + bot avatar |
+| `NOTES_MODE` | `cli` (Claude Code subscription) or `api` (`ANTHROPIC_API_KEY`) |
+| `NOTES_EMAIL` / `NOTES_EMAIL_FROM` / `COMPANY_DOMAIN` | Auto-email of notes |
+| `DRIVE_ROOT_FOLDER_ID` | Drive folder for the notes tree |
+| `MAX_CONCURRENT_BOTS` / `STARTUP_SKIP_MIN` | Concurrency limit / startup-skip threshold |
 
-- Бот отправляется в звонок, когда до старта ≤ 1 минуты (тик — каждую минуту).
-- События без ссылки на Meet, all-day события и события с `[norec]` в названии игнорируются.
-- Бот виден в участниках как **Tryll Notes Bot** — все знают о записи. Если Meet держит его в «зале ожидания», кто-то должен впустить (бот от аккаунта домена пускается автоматически — настрой в Vexa).
-- Если встреча затянулась более чем на 30 минут сверх плана — бот принудительно останавливается, транскрипт сохраняется.
-- Имя файла: `<Название события> — <YYYY-MM-DD>.docx`, папка — по названию серии (`recurringEventId`).
+Opt a meeting out of recording by adding `[norec]` to its calendar title.
 
-## Ограничения v1
-
-- Только Google Meet (Vexa умеет Zoom/Teams — добавляется в `calendar.ts` + `vexa.ts`).
-- Один календарь (`GOOGLE_CALENDAR_ID`).
-- Заметки в .docx; вариант «Google Doc» — заменить mimeType в `src/drive.ts` на `application/vnd.google-apps.document` (Drive сконвертирует сам).
-
-## Локальная проверка
+## Run
 
 ```bash
-npm install
-npm run typecheck
-npx vercel dev   # затем GET http://localhost:3000/api/tick?secret=...
+docker compose up -d --build      # build & start the runner (restarts with Docker)
+docker logs -f tryll-runner       # watch activity
 ```
+
+The runner attaches to the same Docker network as Vexa and ticks automatically.
+For a non-container local run: `npm install && npm run local`.
