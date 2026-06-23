@@ -6,7 +6,8 @@ export type MeetingStatus =
   | "joining" // бот отправлен, созвон идёт
   | "awaiting_notes" // транскрипт получен, ждём заметки (путь B без API-ключа)
   | "done"
-  | "failed";
+  | "failed"
+  | "skipped"; // мит уже шёл при пробуждении раннера — бота не слали
 
 export interface MeetingRecord {
   eventId: string;

@@ -27,6 +27,15 @@ const STALL_MS = Number(process.env.STALL_MIN || 10) * 60_000;
 // «running» (реально вышел/завис) → раннер сам добивает бота и собирает заметки.
 const FORCE_LEAVE_AFTER_END_MS = Number(process.env.FORCE_LEAVE_AFTER_END_MIN || 10) * 60_000;
 
+// Момент запуска (пробуждения) раннера. У нас нет 24/7 сервера: включил ПК →
+// поднял Docker → раннер ожил. Если в этот момент уже идёт мит, начавшийся ДО
+// пробуждения и идущий дольше STARTUP_SKIP — бота не шлём (иначе он зайдёт под
+// конец). На обычный поток не влияет: миты, начавшиеся ПОСЛЕ старта раннера,
+// под это правило не попадают (startMs < RUNNER_STARTED_AT там ложно).
+const RUNNER_STARTED_AT = Date.now();
+const STARTUP_SKIP_MS = Number(process.env.STARTUP_SKIP_MIN || 5) * 60_000;
+console.log(`runner проснулся: ${new Date(RUNNER_STARTED_AT).toISOString()} (пропуск митов, идущих >${STARTUP_SKIP_MS / 60_000} мин на момент старта)`);
+
 const nowISO = () => new Date().toISOString();
 
 /** Транскрипт без падения тика: Vexa моргнула → null, попробуем в следующий раз. */
@@ -56,6 +65,21 @@ async function dispatchBots(log: string[], running: Set<string>): Promise<void> 
 
   for (const m of meetings) {
     if (await getMeeting(m.eventId)) continue; // уже обработан/обрабатывается
+    // Пробуждение раннера: мит уже шёл ДО старта раннера и идёт дольше порога →
+    // не заходим (бот пришёл бы под конец). Помечаем skipped, чтобы не дёргать
+    // повторно. Нормальные миты (начались после старта раннера) сюда не попадают.
+    const startMs = Date.parse(m.startISO);
+    if (startMs < RUNNER_STARTED_AT && Date.now() > startMs + STARTUP_SKIP_MS) {
+      const ageMin = Math.round((Date.now() - startMs) / 60_000);
+      await saveMeeting({
+        ...m,
+        platform: "google_meet",
+        status: "skipped",
+        error: `пропущен при пробуждении раннера: мит уже шёл ${ageMin} мин`,
+      });
+      log.push(`startup-skip (${ageMin} мин в мите): ${m.title}`);
+      continue;
+    }
     if (used.has(m.nativeId)) continue; // бот уже в этом звонке (общий мит)
     if (used.size >= MAX_CONCURRENT) {
       log.push(`slot full (${used.size}/${MAX_CONCURRENT}), отложен: ${m.title}`);
