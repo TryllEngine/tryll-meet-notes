@@ -57,23 +57,11 @@ else:
     io.open(PATH, "w", encoding="utf-8").write(src)
     print("index.js: patched -> local /master-profile + per-bot copy")
 
-# --- join.js: убрать анонимный fallback в authenticated-режиме ---
-# Если cookies не подхватились (виден 'Ask to join'), бот НЕ заходит анонимно,
-# а уходит с ошибкой — чтобы не было постороннего "Tryll Notes Bot" в звонке.
-JOIN_PATH = "/app/vexa-bot/dist/platforms/googlemeet/join.js"
-ANCHOR_FALLBACK = (
-    '                await clickHandle(joinButton.el, "ask_to_join");\n'
-    "                (0, utils_1.log)(`Bot joined Google Meet via fallback (Ask to join).`);"
-)
-REPLACE_FALLBACK = (
-    '                throw new Error("tryll: auth cookies not loaded — refusing anonymous fallback"); /* tryll no-anon-fallback */'
-)
-jsrc = io.open(JOIN_PATH, encoding="utf-8").read()
-if "tryll no-anon-fallback" in jsrc:
-    print("join.js: already patched")
-elif ANCHOR_FALLBACK not in jsrc:
-    print("join.js: WARN fallback anchor not found — проверить вручную")
-else:
-    jsrc = jsrc.replace(ANCHOR_FALLBACK, REPLACE_FALLBACK)
-    io.open(JOIN_PATH, "w", encoding="utf-8").write(jsrc)
-    print("join.js: anonymous fallback disabled")
+# --- join.js: НЕ трогаем (оставляем оригинальный «Ask to join») ---
+# Раньше мы здесь отключали fallback (бот падал, если нет авто-впуска), чтобы не
+# было постороннего бота. Но это ломало миты с ВНЕШНИМ организатором (не
+# tryllengine): для них Google не даёт «Join now», только «Ask to join». Теперь
+# оставляем штатное поведение Vexa: внутренние миты → авто-впуск (Join now),
+# внешние → бот стучится (Ask to join) под socials@ и ждёт, пока впустят.
+# Ничего не патчим — оригинальный join.js уже это умеет.
+print("join.js: не патчим (оставляем штатный Ask to join — стук при внешнем организаторе)")
