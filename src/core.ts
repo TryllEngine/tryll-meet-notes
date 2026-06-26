@@ -26,6 +26,9 @@ const GHOST_NO_AUDIO_MS = Number(process.env.GHOST_NO_AUDIO_MIN || 3) * 60_000;
 // Дальний предохранитель: бот живёт дольше любого реального мита (> его же лимита
 // max_bot_time ~2ч) → точно зависший призрак, добиваем.
 const HARD_MAX_MS = Number(process.env.HARD_MAX_MIN || 150) * 60_000;
+// Бот упал на старте (Chrome/Xvfb гонка) и ни разу не зашёл → переотправляем
+// столько раз, пока мит не кончился. Гонка при повторе почти всегда проходит.
+const MAX_LAUNCH_RETRIES = Number(process.env.LAUNCH_RETRIES || 2);
 
 // Момент запуска (пробуждения) раннера. У нас нет 24/7 сервера: включил ПК →
 // поднял Docker → раннер ожил. Если в этот момент уже идёт мит, начавшийся ДО
@@ -113,6 +116,7 @@ async function collectFinished(log: string[], running: Map<string, number>): Pro
     }
     const now = Date.now();
     const startMs = Date.parse(m.startISO);
+    const endMs = Date.parse(m.endISO);
     let botRunning = running.has(m.nativeId);
 
     if (botRunning) {
@@ -129,6 +133,10 @@ async function collectFinished(log: string[], running: Map<string, number>): Pro
       }
       if (m.botGoneAtISO) {
         m.botGoneAtISO = undefined;
+        changed = true;
+      }
+      if (!m.botSeenRunning) {
+        m.botSeenRunning = true; // бот реально зашёл — это не «упал на старте»
         changed = true;
       }
 
@@ -168,8 +176,23 @@ async function collectFinished(log: string[], running: Map<string, number>): Pro
 
     // транскрипт стабилен (Whisper доделал) либо вышел потолок грейса — собираем
     if (!tr) {
+      // Бот ни разу не появлялся в running и транскрипта нет → почти наверняка
+      // упал на старте (гонка Chrome/Xvfb). Переотправляем, пока мит не кончился.
+      if (!m.botSeenRunning && (m.launchRetries ?? 0) < MAX_LAUNCH_RETRIES && now < endMs) {
+        try {
+          await requestBot(m.nativeId);
+          m.launchRetries = (m.launchRetries ?? 0) + 1;
+          m.botGoneAtISO = undefined;
+          m.lastTranscriptLen = undefined;
+          await saveMeeting(m); // статус остаётся joining, мит остаётся active
+          log.push(`launch retry #${m.launchRetries} (бот упал на старте): ${m.title}`);
+        } catch (e) {
+          log.push(`launch retry failed: ${m.title}: ${e}`);
+        }
+        continue;
+      }
       m.status = "failed";
-      m.error = "Транскрипт пуст: бота не впустили или никто не говорил";
+      m.error = "Транскрипт пуст: бота не впустили / упал на старте / никто не говорил";
       await saveMeeting(m);
       await unmarkActive(eventId);
       log.push(`no transcript: ${m.title}`);

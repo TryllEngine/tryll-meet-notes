@@ -38,6 +38,11 @@ export interface MeetingRecord {
   tldrEn?: string[];
   /** когда письмо ушло (идемпотентность: одно письмо на мит) */
   emailedAt?: string;
+  /** бот хоть раз реально появился в running (был в мите) — отличает «никто не
+   *  пришёл» (был в running) от «упал на старте» (ни разу не был) */
+  botSeenRunning?: boolean;
+  /** сколько раз переотправляли бота после краша на старте (Chrome/Xvfb гонка) */
+  launchRetries?: number;
 }
 
 const ACTIVE = "meetings:active";
