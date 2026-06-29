@@ -40,11 +40,12 @@
   .nowline{position:absolute;left:0;right:0;border-top:2px solid #ff5d5d;z-index:2}
   .nowline::before{content:"";position:absolute;left:-4px;top:-5px;width:8px;height:8px;border-radius:50%;background:#ff5d5d}
 
-  .ev{position:absolute;left:3px;right:3px;border-radius:7px;padding:4px 7px;overflow:hidden;cursor:pointer;border-left:4px solid;background:var(--panel2);box-shadow:0 1px 4px rgba(0,0,0,.3);font-size:12px}
-  .ev:hover{filter:brightness(1.15)}
-  .ev .t{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .ev .badge{display:inline-block;font-size:10px;padding:1px 5px;border-radius:4px;margin-top:2px;font-weight:600}
-  .ev .ico{font-size:11px;opacity:.85}
+  .ev{position:absolute;left:3px;right:3px;border-radius:7px;padding:3px 7px;overflow:hidden;cursor:pointer;border-left:4px solid;background:var(--panel2);box-shadow:0 1px 4px rgba(0,0,0,.3);font-size:12px;display:flex;flex-direction:column;gap:1px}
+  .ev:hover{filter:brightness(1.18)}
+  .ev .t{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.25}
+  .ev.tiny .t{font-size:11px}
+  .ev .badge{align-self:flex-start;font-size:10px;padding:1px 6px;border-radius:4px;margin-top:1px;font-weight:600;white-space:nowrap}
+  .ev .ico{font-size:11px;opacity:.8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .b-done{border-color:var(--done)} .b-done .badge{background:var(--done)}
   .b-failed{border-color:var(--failed)} .b-failed .badge{background:var(--failed)}
   .b-skipped{border-color:var(--skipped)} .b-skipped .badge{background:var(--skipped)}
@@ -170,10 +171,14 @@ function draw(){
       if(top<0){hgt+=top;top=0}
       const w=100/e._cols, left=e._col*w;
       const st=STATUS[e.botStatus]||STATUS.none;
-      h+=`<div class="ev ${st[1]}" style="top:${top}px;height:${hgt}px;left:calc(${left}% + 3px);width:calc(${w}% - 6px)" onclick="openDrawer('${e.id}')">
+      const hasBot=e.botStatus!=="none";
+      const showBadge=hasBot&&hgt>=46;        // плашка только если влезает
+      const showTime=hgt>=30;
+      const tiny=hgt<30;
+      h+=`<div class="ev ${st[1]} ${tiny?'tiny':''}" style="top:${top}px;height:${hgt}px;left:calc(${left}% + 3px);width:calc(${w}% - 6px)" onclick="openDrawer('${e.id}')" title="${esc(e.title)}">
         <div class="t">${esc(e.title)}</div>
-        <div class="ico">${hhmm(e.start)}${e.externalOrganizer?' · <span class="ext">внеш.</span>':''}${e.norec?' · 🚫':''}</div>
-        <span class="badge">${st[0]}</span>
+        ${showTime?`<div class="ico">${hhmm(e.start)}${e.externalOrganizer?' · <span class="ext">внеш.</span>':''}${e.norec?' · 🚫':''}</div>`:''}
+        ${showBadge?`<span class="badge">${st[0]}</span>`:''}
       </div>`;
     });
     h+='</div>';
