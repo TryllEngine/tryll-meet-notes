@@ -71,6 +71,12 @@ async function ensureSeriesFolder(rootId: string, seriesName: string): Promise<s
   return created.data.id!;
 }
 
+/** ID папки серии (создаёт при необходимости). Для рендера заметок через Docs API. */
+export async function resolveSeriesFolder(seriesName: string): Promise<string> {
+  const root = await getRootFolderId();
+  return ensureSeriesFolder(root, seriesName);
+}
+
 /**
  * Кладёт заметки в "<корень>/<папка серии>/<fileName>" как НАТИВНЫЙ Google Doc.
  * Загружаем .docx-байты, а Drive конвертирует их в Google Doc (mimeType цели =

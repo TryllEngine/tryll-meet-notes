@@ -1,32 +1,40 @@
-import { buildNotesDocx } from "./docx";
-import { uploadNotesDocx } from "./drive";
+import { resolveSeriesFolder } from "./drive";
 import { filterDomainRecipients, sendNotesEmail } from "./email";
-import type { MeetingNotes } from "./notes";
+import { createGeminiDoc } from "./gdocs";
+import type { GeminiNotes } from "./notes-gemini";
 import { MeetingRecord, saveMeeting, unmarkPending } from "./store";
 
 /**
- * Собирает .docx из заметок и кладёт на Drive как нативный Google Doc.
- * ИДЕМПОТЕНТНО: если документ уже залит (m.noteDocUrl) — повторно ничего не
- * делает. Сохраняет ссылку и английские поля (для письма) в запись.
+ * Создаёт Google Doc с заметками 1:1 в стиле «Notes by Gemini» (Docs API).
+ * ИДЕМПОТЕНТНО: если документ уже создан (m.noteDocUrl) — повторно не делает.
+ * Сохраняет ссылку + английские поля (для письма) в запись.
  */
-export async function uploadNotes(m: MeetingRecord, notes: MeetingNotes): Promise<string> {
+export async function uploadNotes(m: MeetingRecord, notes: GeminiNotes): Promise<string> {
   if (m.noteDocUrl) return m.noteDocUrl;
-  const titleEn = (notes.title_en || m.title).trim();
-  const date = m.startISO.slice(0, 10);
-  const fileName = `${titleEn} - ${date}`;
-  const docx = await buildNotesDocx(titleEn, m.startISO, notes, m.transcript ?? "");
-  const url = await uploadNotesDocx(m.seriesName, fileName, docx);
+  let folderId: string | null = null;
+  try {
+    folderId = await resolveSeriesFolder(m.seriesName);
+  } catch {
+    /* папка недоступна — док останется в My Drive */
+  }
+  const { url } = await createGeminiDoc({
+    meeting: m.title,
+    dateISO: m.startISO,
+    notes,
+    attendees: [...new Set(m.attendees ?? [])],
+    eventUrl: `https://meet.google.com/${m.nativeId}`,
+    folderId,
+  });
   m.noteDocUrl = url;
-  m.titleEn = titleEn;
-  m.tldrEn = notes.tldr_en ?? [];
+  m.titleEn = m.title; // заметки на английском, заголовок = имя мита
+  m.tldrEn = [notes.summary_intro, ...(notes.summary_sections ?? []).map((s) => s.heading)].filter(Boolean).slice(0, 6);
   await saveMeeting(m);
   return url;
 }
 
 /**
- * Шлёт письмо-карточку участникам с доменом компании. ИДЕМПОТЕНТНО: помечает
- * m.emailedAt, чтобы письмо ушло ровно один раз (даже если ретраим заметки).
- * Использует сохранённые titleEn/tldrEn — перегенерация заметок не нужна.
+ * Шлёт письмо-карточку участникам с доменом компании. ИДЕМПОТЕНТНО: m.emailedAt —
+ * одно письмо на мит. Использует сохранённые titleEn/tldrEn (перегенерация не нужна).
  */
 export async function emailNotes(m: MeetingRecord): Promise<void> {
   if (m.emailedAt || !m.noteDocUrl) return;
@@ -34,7 +42,7 @@ export async function emailNotes(m: MeetingRecord): Promise<void> {
   if (recipients.length > 0) {
     await sendNotesEmail(recipients, m.titleEn || m.title, m.startISO, m.noteDocUrl, m.tldrEn ?? []);
   }
-  m.emailedAt = new Date().toISOString(); // даже если получателей нет — шаг выполнен
+  m.emailedAt = new Date().toISOString();
   await saveMeeting(m);
 }
 
@@ -42,7 +50,7 @@ export async function emailNotes(m: MeetingRecord): Promise<void> {
  * Полный финал в один заход (используется Vercel-путём /api/pending).
  * Локальный раннер ходит через uploadNotes/emailNotes по отдельности (с ретраями).
  */
-export async function finalizeMeeting(m: MeetingRecord, notes: MeetingNotes): Promise<string> {
+export async function finalizeMeeting(m: MeetingRecord, notes: GeminiNotes): Promise<string> {
   const url = await uploadNotes(m, notes);
   if (process.env.NOTES_EMAIL === "true") {
     try {

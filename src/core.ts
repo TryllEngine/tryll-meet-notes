@@ -1,7 +1,6 @@
 import { upcomingMeetings } from "./calendar";
 import { emailNotes, uploadNotes } from "./finalize";
-import { generateNotes, MeetingNotes } from "./notes";
-import { generateNotesViaCli } from "./notes-cli";
+import { generateGeminiNotesViaCli } from "./notes-gemini";
 import {
   getMeeting,
   listActive,
@@ -219,7 +218,6 @@ async function collectFinished(log: string[], running: Map<string, number>): Pro
  * (загрузка по m.noteDocUrl, письмо по m.emailedAt — повторно не делает).
  */
 async function processPending(log: string[]): Promise<void> {
-  const mode = process.env.NOTES_MODE ?? (process.env.ANTHROPIC_API_KEY ? "api" : "cli");
   for (const eventId of await listPending()) {
     const m = await getMeeting(eventId);
     if (!m || m.status === "done") {
@@ -229,10 +227,8 @@ async function processPending(log: string[]): Promise<void> {
     if (m.status !== "awaiting_notes" || !m.transcript) continue;
     try {
       if (!m.noteDocUrl) {
-        const notes: MeetingNotes =
-          mode === "api"
-            ? await generateNotes(m.title, m.startISO, m.transcript)
-            : await generateNotesViaCli(m.title, m.startISO, m.transcript);
+        // англ. заметки 1:1 в стиле Gemini → нативный Google Doc (Docs API)
+        const notes = await generateGeminiNotesViaCli(m.title, m.startISO, m.transcript);
         await uploadNotes(m, notes); // ставит noteDocUrl/titleEn/tldrEn, сохраняет
       }
       if (process.env.NOTES_EMAIL === "true" && !m.emailedAt) {

@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { finalizeMeeting } from "../src/finalize";
-import type { MeetingNotes } from "../src/notes";
+import type { GeminiNotes } from "../src/notes-gemini";
 import { getMeeting, listPending } from "../src/store";
 
 /**
@@ -40,7 +40,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === "POST") {
     const { eventId, notes } = (req.body ?? {}) as {
       eventId?: string;
-      notes?: MeetingNotes;
+      notes?: GeminiNotes;
     };
     if (!eventId || !notes) {
       return res.status(400).json({ error: "eventId and notes are required" });
