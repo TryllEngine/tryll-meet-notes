@@ -22,6 +22,26 @@ services:
     networks:
       - vexa-network
 
+  # Дашборд-календарь (read-only): смотрит миты всех + статус бота. Изолирован —
+  # монтирует стор раннера ТОЛЬКО на чтение (:ro), на ботов/раннер не влияет.
+  # Открывать: http://localhost:8090
+  dashboard:
+    build: ./dashboard
+    image: tryll-dashboard
+    container_name: tryll-dashboard
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      VEXA_BASE_URL: http://vexa-lite:8056
+      STORE_FILE: /data/store.json
+      DASHBOARD_PORT: 8090
+    volumes:
+      - runner-data:/data:ro
+    ports:
+      - "8090:8090"
+    networks:
+      - vexa-network
+
 volumes:
   runner-data:
 

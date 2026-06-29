@@ -1,0 +1,13 @@
+{
+  "name": "tryll-meet-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Read-only calendar dashboard for Tryll Meet Notes — shows all team meetings + bot status",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "googleapis": "^173.0.0"
+  }
+}
