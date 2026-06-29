@@ -90,16 +90,9 @@ async function getMeetings(fromISO, toISO) {
       // нет доступа к календарю — не валим остальные
     }
   }
-  const store = readStore();
-  // индекс store по eventId и по nativeId (последний по времени)
-  const byEvent = store;
-  const byNative = {};
-  for (const m of Object.values(store)) {
-    if (!m.nativeId) continue;
-    const prev = byNative[m.nativeId];
-    if (!prev || (m.startISO || "") > (prev.startISO || "")) byNative[m.nativeId] = m;
-  }
+  const byEvent = readStore(); // ключ = eventId (уникален для каждой даты/повтора)
   const live = await liveBots();
+  const now = Date.now();
 
   const seen = new Set();
   const out = [];
@@ -110,8 +103,10 @@ async function getMeetings(fromISO, toISO) {
     const key = code || ev.id;
     if (seen.has(key)) continue; // общий мит из нескольких календарей — один раз
     seen.add(key);
-    const rec = byEvent[ev.id] || (code ? byNative[code] : null) || null;
-    const isLive = code ? live.has(code) : false;
+    const rec = byEvent[ev.id] || null; // строго по eventId — recurring с одним Meet-кодом не путаем
+    const sMs = Date.parse(ev.start.dateTime), eMs = Date.parse(ev.end.dateTime);
+    const happening = now >= sMs - 5 * 60000 && now <= eMs + 30 * 60000;
+    const isLive = !!(code && happening && live.has(code)); // «идёт» только в окне мита
     const attendees = (ev.attendees ?? [])
       .map((a) => a.email || "")
       .filter((e) => e && !e.endsWith(".calendar.google.com"));
