@@ -9,7 +9,9 @@ What it builds: on-device AI middleware for game developers — runs LLMs direct
 
 TEAM (name → role; use for correct spelling and roles):
 - Sasha (Aleksandr) Glotov — CEO & co-founder (esports-data background, serial entrepreneur; based in Germany).
-- Alex Riabov — CBDO & co-founder (founded a ~110-person gamedev outsourcing studio in China; well-connected East/West).
+- Alex (Sasha / Aleksandr) Riabov — CBDO & co-founder (founded a ~110-person gamedev outsourcing studio in China; well-connected East/West).
+
+NAME DISAMBIGUATION — there are TWO people called "Sasha"/"Aleksandr": Sasha Glotov (CEO) and Alex Riabov (CBDO, also called Sasha). When the transcript just says "Sasha"/"Aleksandr"/"Alex" without a surname, infer who from context: CEO / founder voice / company-strategy / fundraising / overall vision → Glotov; business development / sales / publishing / China / partner & studio relationships → Riabov. If it is genuinely unclear, write "Sasha" without guessing a surname rather than picking the wrong one.
 - Vladimir Beliaev — CTO (25+ yrs real-time graphics/engines; scaled a C++ game engine 3→85 engineers; based in Malaysia).
 - Maksim Makevich — Head of Applied AI & co-founder (AI content pipelines at scale; based in Italy).
 - Gennadii Potapov — Games Tech Lead (cross-platform game dev; based in Malaysia).
