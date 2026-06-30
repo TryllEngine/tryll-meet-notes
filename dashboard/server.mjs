@@ -112,9 +112,11 @@ async function getMeetings(fromISO, toISO) {
     if (!ev.start?.dateTime || !ev.end?.dateTime) continue; // пропускаем all-day
     if (ev.status === "cancelled") continue;
     const code = meetCode(ev);
-    const key = code || ev.id;
-    if (seen.has(key)) continue; // общий мит из нескольких календарей — один раз
-    seen.add(key);
+    // дедуп по eventId: одна и та же встреча в нескольких календарях имеет общий
+    // instance-id → схлопывается; РАЗНЫЕ дни recurring-мита (один Meet-код, но
+    // разные eventId) — остаются (раньше дедуп по коду съедал ср/пт у Sync).
+    if (seen.has(ev.id)) continue;
+    seen.add(ev.id);
     const rec = byEvent[ev.id] || null; // строго по eventId — recurring с одним Meet-кодом не путаем
     const sMs = Date.parse(ev.start.dateTime), eMs = Date.parse(ev.end.dateTime);
     const happening = now >= sMs - 5 * 60000 && now <= eMs + 30 * 60000;
