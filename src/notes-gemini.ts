@@ -1,4 +1,5 @@
 import { spawn } from "child_process";
+import { TEAM_CONTEXT } from "./context";
 
 /**
  * Заметки в стиле «Notes by Gemini» — ВСЕГДА на английском, структура 1:1:
@@ -44,7 +45,8 @@ Rules:
 - decisions_aligned = things the team agreed on; decisions_open = things left undecided / to discuss. Either may be empty [].
 - next_steps: concrete action items with an owner. Owner is a person's name from the transcript (or "The group").
 - details: one bullet per distinct discussion topic, in chronological-ish order, like Gemini's "Details" section.
-- Everything in English. Keep proper names/brands as-is.`;
+- Everything in English. Keep proper names/brands as-is.
+- A CONTEXT block (company & team) is provided below ONLY to spell names/roles correctly and understand terms. Base ALL notes strictly on the transcript — never add facts that weren't said. Note: a participant literally named "Tryll Engine" is the recording bot, not a person — ignore it / never treat it as a speaker.`;
 
 function runClaude(stdinText: string, timeoutMs: number): Promise<string> {
   const model = process.env.NOTES_CLI_MODEL || "sonnet";
@@ -84,7 +86,7 @@ export async function generateGeminiNotesViaCli(
   dateISO: string,
   transcript: string,
 ): Promise<GeminiNotes> {
-  const prompt = `${INSTRUCTION}\n\nMeeting: «${title}», date: ${dateISO.slice(0, 10)}.\n\nTranscript (format "Name: line"):\n\n${transcript}`;
+  const prompt = `${INSTRUCTION}\n\n=== CONTEXT (reference only) ===\n${TEAM_CONTEXT}\n\n=== MEETING ===\nMeeting: «${title}», date: ${dateISO.slice(0, 10)}.\n\nTranscript (format "Name: line"):\n\n${transcript}`;
   const raw = await runClaude(prompt, 10 * 60_000);
   const idx = raw.indexOf('{"type":"result"');
   const jsonStart = idx >= 0 ? idx : raw.indexOf("{");
