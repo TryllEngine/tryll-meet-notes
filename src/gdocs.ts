@@ -148,7 +148,19 @@ export async function createGeminiDoc(opts: {
   // Footer
   b.line([{ text: "Sent automatically by Tryll Meeting Notes.", size: 9, italic: true, color: C.faint }], { spaceBefore: 20 });
 
-  const created = await docs.documents.create({ requestBody: { title: docTitle(opts.meeting, opts.dateISO) } });
+  const title = docTitle(opts.meeting, opts.dateISO);
+
+  // Идемпотентность: если процесс упал МЕЖДУ созданием дока и сохранением
+  // m.noteDocUrl (или тики пересеклись), ретрай не должен плодить второй док.
+  // Имя уникально по миту (включает дату/время) — ищем его перед созданием.
+  try {
+    const q = `name = '${title.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}' and mimeType = 'application/vnd.google-apps.document' and trashed = false`;
+    const found = await drive.files.list({ q, fields: "files(id,webViewLink)", pageSize: 1, supportsAllDrives: true, includeItemsFromAllDrives: true });
+    const ex = found.data.files?.[0];
+    if (ex?.id) return { url: ex.webViewLink || `https://docs.google.com/document/d/${ex.id}/edit`, id: ex.id };
+  } catch { /* поиск недоступен — просто создаём новый (как раньше) */ }
+
+  const created = await docs.documents.create({ requestBody: { title } });
   const id = created.data.documentId!;
   await docs.documents.batchUpdate({ documentId: id, requestBody: { requests: b.requests() } });
 
