@@ -109,7 +109,7 @@ function mondayOf(d){d=new Date(d);const w=(d.getDay()+6)%7;d.setHours(0,0,0,0);
 function addDays(d,n){const x=new Date(d);x.setDate(x.getDate()+n);return x}
 function fmtRange(a){const b=addDays(a,6);const o={day:"numeric",month:"short"};return a.toLocaleDateString("ru-RU",o)+" – "+b.toLocaleDateString("ru-RU",o)+" "+b.getFullYear()}
 function hhmm(iso){return new Date(iso).toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"})}
-function esc(s){return (s||"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]))}
+function esc(s){return (s||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 
 function shift(n){weekStart=addDays(weekStart,n);render()}
 function goToday(){weekStart=mondayOf(new Date());render()}
@@ -198,8 +198,8 @@ async function openDrawer(id){
     <div class="row"><span class="k">Участники</span><span>${(e.attendees||[]).map(esc).join("<br>")||"—"}</span></div>
     ${e.error?`<div class="row"><span class="k">Ошибка</span><span style="color:#ff8a8a">${esc(e.error)}</span></div>`:""}
     <div class="actions">
-      ${e.noteUrl?`<a href="${e.noteUrl}" target="_blank"><button class="primary">📄 Заметки на Drive</button></a>`:""}
-      ${e.meetUrl?`<a href="${e.meetUrl}" target="_blank"><button>🎥 Открыть Meet</button></a>`:""}
+      ${e.noteUrl?`<a href="${esc(e.noteUrl)}" target="_blank"><button class="primary">📄 Заметки на Drive</button></a>`:""}
+      ${e.meetUrl?`<a href="${esc(e.meetUrl)}" target="_blank"><button>🎥 Открыть Meet</button></a>`:""}
       ${e.meetCode?`<button onclick="viewTranscript('${e.meetCode}')">📝 Транскрипт</button>`:""}
       ${e.meetCode?`<button onclick="resend('${e.meetCode}',this)">🤖 Переотправить бота</button>`:""}
       <button onclick="toggleSkip('${e.id}',this)">${e.manualSkip?'✅ Вернуть бота':'🚫 Бота не впускать'}</button>
