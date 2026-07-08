@@ -11,7 +11,7 @@
 FROM vexaai/vexa-lite:latest
 
 COPY patch_vexa_auth.py patch-vexa-speaker.py patch-vexa-leave.py /tryll-patches/
-COPY vexa-image/patch-vexa-display-build.py vexa-image/patch-vexa-camera-build.py vexa-image/patch-vexa-writeback-build.py vexa-image/patch-vexa-accountchooser-build.py vexa-image/patch-vexa-cameralogo-build.py /tryll-patches/
+COPY vexa-image/patch-vexa-display-build.py vexa-image/patch-vexa-camera-build.py vexa-image/patch-vexa-writeback-build.py vexa-image/patch-vexa-accountchooser-build.py vexa-image/patch-vexa-cameralogo-build.py vexa-image/patch-vexa-speaker-fuzz-build.py /tryll-patches/
 
 # Наш логотип как дефолтный аватар камеры (надёжно, локально, без сети)
 COPY vexa-image/bot-avatar.png /app/vexa-bot/assets/vexa-logo-default.png
@@ -27,4 +27,5 @@ RUN python3 /tryll-patches/patch_vexa_auth.py \
  && python3 /tryll-patches/patch-vexa-writeback-build.py \
  && python3 /tryll-patches/patch-vexa-accountchooser-build.py \
  && python3 /tryll-patches/patch-vexa-cameralogo-build.py \
+ && python3 /tryll-patches/patch-vexa-speaker-fuzz-build.py \
  && echo "tryll patches baked OK"
