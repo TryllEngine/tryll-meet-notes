@@ -122,7 +122,6 @@
 
 <script>
 const DAY_START=0, DAY_END=24, PXH=52; // все 24ч, скролл по времени как в Google
-const VIS_MIN=Math.round(22/PXH*3600000); // мин. визуальная длительность события (≈25мин при мин-высоте 22px) — для раскладки
 const STATUS={live:["идёт / пишет","b-live"],done:["записан ✓","b-done"],failed:["не записан","b-failed"],
   skipped:["пропущен","b-skipped"],pending:["в работе","b-pending"],none:["нет бота","b-none"]};
 let weekStart=mondayOf(new Date());
@@ -161,20 +160,26 @@ function render(){
   load().then(draw);
 }
 
-function layout(evs){ // раскладка как в Google Calendar: кластеры пересечений
-  // _e = ВИЗУАЛЬНый конец (учитывает мин-высоту): встык-события, которые налезают
-  // друг на друга по картинке, считаем пересекающимися → раскладываем рядом.
-  evs.forEach(e=>{e._s=+new Date(e.start);e._e=Math.max(+new Date(e.end),e._s+VIS_MIN)});
+function layout(evs){ // как в Google Calendar: РЯДОМ только реально пересекающиеся
+  evs.forEach(e=>{e._s=+new Date(e.start);e._e=Math.max(+new Date(e.end),e._s+1)});
   evs.sort((a,b)=>a._s-b._s||a._e-b._e);
   let cluster=[],colEnds=[],clusterEnd=-1;
   const flush=()=>{const n=colEnds.length||1;cluster.forEach(e=>e._cols=n);cluster=[];colEnds=[];};
   evs.forEach(e=>{
-    if(cluster.length&&e._s>=clusterEnd){flush();clusterEnd=-1;} // событие не пересекается с кластером → закрываем
-    let col=colEnds.findIndex(end=>end<=e._s);              // первая свободная колонка
+    if(cluster.length&&e._s>=clusterEnd){flush();clusterEnd=-1;} // не пересекается с кластером → закрываем
+    let col=colEnds.findIndex(end=>end<=e._s);              // первая свободная колонка (по РЕАЛЬному времени)
     if(col===-1){col=colEnds.length;colEnds.push(e._e);}else{colEnds[col]=e._e;}
     e._col=col;cluster.push(e);clusterEnd=Math.max(clusterEnd,e._e);
   });
   flush();
+  // Кап высоты: для каждого мита — старт ближайшего события, что начинается ПОЗЖЕ и
+  // перекрывается по ГОРИЗОНТАЛИ (та же ширина). Чтобы короткая карточка (мин-высота)
+  // не налезала на следующий встык-мит под ней. Реально пересекающиеся (рядом) не капаются.
+  evs.forEach(e=>{e._nextStart=null;const eL=e._col/e._cols,eR=(e._col+1)/e._cols;
+    for(const o of evs){if(o===e||o._s<=e._s)continue;
+      const oL=o._col/o._cols,oR=(o._col+1)/o._cols;
+      if(oL<eR-1e-6&&oR>eL+1e-6&&(e._nextStart==null||o._s<e._nextStart))e._nextStart=o._s;}
+  });
   return evs;
 }
 
@@ -198,10 +203,12 @@ function draw(){
       const laneH=hours*PXH;
       let top=(s.getHours()+s.getMinutes()/60-DAY_START)*PXH;
       let hgt=Math.max(((en-s)/3600000)*PXH-2,22);
+      const gapPx=e._nextStart!=null?((e._nextStart-e._s)/3600000*PXH-1):1e9;
+      hgt=Math.min(hgt,gapPx);                // короткая карточка не налезает на следующий встык-мит (идут стопкой)
       if(top<0){hgt+=top;top=0}
-      if(top>laneH-18)top=laneH-18;          // событие позже сетки — не торчит вниз
-      if(top+hgt>laneH)hgt=laneH-top;         // не вылезает за низ
-      if(hgt<18)hgt=18;
+      if(top>laneH-14)top=laneH-14;           // событие в самом низу — не торчит за сетку
+      if(top+hgt>laneH)hgt=laneH-top;
+      if(hgt<13)hgt=13;
       const w=100/e._cols, left=e._col*w;
       const st=STATUS[e.botStatus]||STATUS.none;
       const hasBot=e.botStatus!=="none";
@@ -218,6 +225,9 @@ function draw(){
     h+='</div>';
   }
   document.getElementById("grid").innerHTML=h;
+  // выровнять колонки шапки под скроллбар сетки (иначе линии дней «плывут»)
+  const _g=document.getElementById("grid");
+  document.getElementById("colhead").style.paddingRight=(_g.offsetWidth-_g.clientWidth)+"px";
   // при первом рендере — прокрутить к рабочему времени (около «сейчас», иначе 7:00);
   // дальше пользователь крутит сам на все 24ч (ночные миты видно).
   if(!window.__scrolled){window.__scrolled=true;
