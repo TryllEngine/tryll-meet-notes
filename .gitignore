@@ -9,3 +9,4 @@ scripts/login-helper/build.err
 scripts/login-helper/build.log
 *.secret.env
 scripts/vexa-image/.vexa-secret.env
+src/context.local.txt

@@ -1,0 +1,14 @@
+COMPANY — <One-line what the company is and what it builds. Used only so the
+notes model spells names/terms right and understands jargon — NEVER as a source
+of facts for the notes themselves.>
+
+TEAM (name → role; use for correct spelling and roles):
+- <Full Name> — <role> (<short bio / location, optional>).
+- <Full Name> — <role>.
+
+NAME DISAMBIGUATION (optional) — if two people share a first name, say how to
+tell them apart from context.
+
+# Copy this file to src/context.local.txt and fill in real details.
+# src/context.local.txt is gitignored (it holds sensitive company/team info)
+# and is baked into the runner image at build time (COPY src ./src).
