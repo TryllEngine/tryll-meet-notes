@@ -127,9 +127,20 @@ export async function getTranscript(nativeId: string): Promise<string | null> {
     if (speaker === prevSpeaker && lines.length > 0) {
       lines[lines.length - 1] += ` ${text}`;
     } else {
-      lines.push(`${speaker}: ${text}`);
+      // Таймкод начала реплики в CEST ([HH:MM]) — для навигации по записи.
+      // Срезается перед отправкой в Claude (notes-gemini), в заметках не влияет.
+      const tc = fmtCEST(s.absolute_start_time);
+      lines.push(`${tc ? `[${tc}] ` : ""}${speaker}: ${text}`);
       prevSpeaker = speaker;
     }
   }
   return lines.length > 0 ? lines.join("\n") : null;
+}
+
+/** Время сегмента в Europe/Berlin как "HH:MM" (24ч). Пусто, если нет/невалидно. */
+function fmtCEST(iso?: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  return new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Berlin", hour: "2-digit", minute: "2-digit", hour12: false }).format(d);
 }

@@ -139,9 +139,15 @@ export async function createGeminiDoc(opts: {
     for (const raw of opts.transcript.split("\n")) {
       const ln = raw.trim();
       if (!ln) continue;
-      const m = ln.match(/^([^:]{1,60}):\s*(.*)$/); // "Спикер: реплика"
-      if (m && m[2]) b.line([{ text: `${m[1]}: `, size: 10, bold: true, color: C.ink }, { text: m[2], size: 10, color: C.body }], { spaceAfter: 1 });
-      else b.line([{ text: ln, size: 10, color: C.body }], { spaceAfter: 1 });
+      // "[HH:MM] Спикер: реплика" — таймкод (CEST) опционален
+      const m = ln.match(/^(?:\[(\d{1,2}:\d{2})\]\s*)?([^:]{1,60}):\s*(.*)$/);
+      if (m && m[3]) {
+        const runs: Run[] = [];
+        if (m[1]) runs.push({ text: `${m[1]}  `, size: 9, color: C.faint }); // таймкод — серым, ненавязчиво
+        runs.push({ text: `${m[2]}: `, size: 10, bold: true, color: C.ink });
+        runs.push({ text: m[3], size: 10, color: C.body });
+        b.line(runs, { spaceAfter: 1 });
+      } else b.line([{ text: ln, size: 10, color: C.body }], { spaceAfter: 1 });
     }
   }
 

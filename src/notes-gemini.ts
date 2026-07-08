@@ -89,7 +89,10 @@ export async function generateGeminiNotesViaCli(
   attendees: string[] = [],
 ): Promise<GeminiNotes> {
   const people = attendees.length ? attendees.join(", ") : "(not provided)";
-  const prompt = `${INSTRUCTION}\n\n=== CONTEXT (reference only) ===\n${TEAM_CONTEXT}\n\n=== PARTICIPANTS (calendar invite — the ONLY people in this meeting) ===\n${people}\n\n=== MEETING ===\nMeeting: «${title}», date: ${dateISO.slice(0, 10)}.\n\nTranscript (format "Name: line"; speaker labels may be wrong/split — reconcile to participants):\n\n${transcript}`;
+  // Срезаем таймкоды "[HH:MM] " из начала реплик — Claude получает ровно тот же
+  // формат "Name: line", что и раньше (таймкоды нужны только для дока, не для заметок).
+  const transcriptForNotes = transcript.replace(/^\[\d{1,2}:\d{2}\]\s*/gm, "");
+  const prompt = `${INSTRUCTION}\n\n=== CONTEXT (reference only) ===\n${TEAM_CONTEXT}\n\n=== PARTICIPANTS (calendar invite — the ONLY people in this meeting) ===\n${people}\n\n=== MEETING ===\nMeeting: «${title}», date: ${dateISO.slice(0, 10)}.\n\nTranscript (format "Name: line"; speaker labels may be wrong/split — reconcile to participants):\n\n${transcriptForNotes}`;
   const raw = await runClaude(prompt, 10 * 60_000);
   const idx = raw.indexOf('{"type":"result"');
   const jsonStart = idx >= 0 ? idx : raw.indexOf("{");
