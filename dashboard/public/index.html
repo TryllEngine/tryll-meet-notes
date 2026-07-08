@@ -121,7 +121,8 @@
 </div>
 
 <script>
-const DAY_START=7, DAY_END=22, PXH=52; // 7:00–22:00, 52px/час
+const DAY_START=0, DAY_END=24, PXH=52; // все 24ч, скролл по времени как в Google
+const VIS_MIN=Math.round(22/PXH*3600000); // мин. визуальная длительность события (≈25мин при мин-высоте 22px) — для раскладки
 const STATUS={live:["идёт / пишет","b-live"],done:["записан ✓","b-done"],failed:["не записан","b-failed"],
   skipped:["пропущен","b-skipped"],pending:["в работе","b-pending"],none:["нет бота","b-none"]};
 let weekStart=mondayOf(new Date());
@@ -161,7 +162,9 @@ function render(){
 }
 
 function layout(evs){ // раскладка как в Google Calendar: кластеры пересечений
-  evs.forEach(e=>{e._s=+new Date(e.start);e._e=Math.max(+new Date(e.end),e._s+60000)});
+  // _e = ВИЗУАЛЬНый конец (учитывает мин-высоту): встык-события, которые налезают
+  // друг на друга по картинке, считаем пересекающимися → раскладываем рядом.
+  evs.forEach(e=>{e._s=+new Date(e.start);e._e=Math.max(+new Date(e.end),e._s+VIS_MIN)});
   evs.sort((a,b)=>a._s-b._s||a._e-b._e);
   let cluster=[],colEnds=[],clusterEnd=-1;
   const flush=()=>{const n=colEnds.length||1;cluster.forEach(e=>e._cols=n);cluster=[];colEnds=[];};
@@ -205,8 +208,9 @@ function draw(){
       const showBadge=hasBot&&hgt>=46;        // плашка только если влезает
       const showTime=hgt>=30;
       const tiny=hgt<30;
+      const tLines=Math.max(1,Math.floor((hgt-4-(showTime?14:0))/15)); // строк заголовка под высоту карточки
       h+=`<div class="ev ${st[1]} ${tiny?'tiny':''}" style="top:${top}px;height:${hgt}px;left:calc(${left}% + 3px);width:calc(${w}% - 6px)" onclick="openDrawer('${e.id}')" title="${esc(e.title)}">
-        <div class="t">${esc(e.title)}</div>
+        <div class="t" style="-webkit-line-clamp:${tLines}">${esc(e.title)}</div>
         ${showTime?`<div class="ico">${hhmm(e.start)}${e.externalOrganizer?' · <span class="ext">внеш.</span>':''}${e.norec?' · 🚫':''}</div>`:''}
         ${showBadge?`<span class="badge">${st[0]}</span>`:''}
       </div>`;
@@ -214,6 +218,14 @@ function draw(){
     h+='</div>';
   }
   document.getElementById("grid").innerHTML=h;
+  // при первом рендере — прокрутить к рабочему времени (около «сейчас», иначе 7:00);
+  // дальше пользователь крутит сам на все 24ч (ночные миты видно).
+  if(!window.__scrolled){window.__scrolled=true;
+    const g=document.getElementById("grid");
+    const now=new Date();
+    const startHour=(+mondayOf(now)===+weekStart)?Math.max(0,now.getHours()-1):7;
+    g.scrollTop=startHour*PXH;
+  }
 }
 
 async function openDrawer(id){
