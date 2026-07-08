@@ -17,13 +17,13 @@ if "tryll-logo" in src:
     print("cameralogo (build): done")
     sys.exit(0)
 
-# (A) размер: fullframe -> 55% высоты
-a1 = "const maxSize = Math.max(canvas.width, canvas.height) /* tryll fullframe */"
-r1 = "const maxSize = Math.round(canvas.height * 0.55) /* tryll-logo size */"
+# (A) рендер: заполнить ВЕСЬ кадр (cover) — картинка (наш лого на фоне) на весь тайл
+a1 = "const scale = Math.min(maxSize / img.width, maxSize / img.height);"
+r1 = "const scale = Math.max(canvas.width / img.width, canvas.height / img.height); /* tryll-logo cover: весь кадр */"
 if a1 not in src:
-    sys.exit("LOGO: fullframe anchor not found (camera patch не наложен?)")
+    sys.exit("LOGO: scale anchor not found (camera patch не наложен?)")
 src = src.replace(a1, r1, 1)
-print("screen-content.js: logo size -> 55%")
+print("screen-content.js: render -> COVER (full frame)")
 
 # (B) http-URL игнорируем -> берём локальный дефолт (наш лого)
 a2 = "        this._customAvatarDataUri = defaultAvatarUrl;\n"
