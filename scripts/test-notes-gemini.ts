@@ -49,6 +49,7 @@ async function main() {
     attendees,
     eventUrl: `https://meet.google.com/${nativeId}`,
     folderId: process.env.DRIVE_ROOT_FOLDER_ID || null,
+    transcript,
   });
   console.log("DOC:", url);
 

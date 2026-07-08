@@ -78,7 +78,7 @@ function dateLabel(dateISO: string): string {
 }
 
 export async function createGeminiDoc(opts: {
-  meeting: string; dateISO: string; notes: GeminiNotes; attendees: string[]; eventUrl?: string | null; folderId?: string | null;
+  meeting: string; dateISO: string; notes: GeminiNotes; attendees: string[]; eventUrl?: string | null; folderId?: string | null; transcript?: string | null;
 }): Promise<{ url: string; id: string }> {
   const auth = googleAuth();
   const docs = google.docs({ version: "v1", auth });
@@ -131,6 +131,18 @@ export async function createGeminiDoc(opts: {
   if (n.details?.length) {
     b.line([{ text: "Details", size: 20, bold: true, color: C.ink }], H3);
     for (const d of n.details) b.line([{ text: `${d.topic}: `, size: 12, bold: true, color: C.ink }, { text: d.text, size: 12, color: C.body }], { bullet: "disc" });
+  }
+
+  // Full transcript (полная запись мита, тот же шрифт Google Sans Flex, компактнее)
+  if (opts.transcript && opts.transcript.trim()) {
+    b.line([{ text: "Full transcript", size: 20, bold: true, color: C.ink }], H3);
+    for (const raw of opts.transcript.split("\n")) {
+      const ln = raw.trim();
+      if (!ln) continue;
+      const m = ln.match(/^([^:]{1,60}):\s*(.*)$/); // "Спикер: реплика"
+      if (m && m[2]) b.line([{ text: `${m[1]}: `, size: 10, bold: true, color: C.ink }, { text: m[2], size: 10, color: C.body }], { spaceAfter: 1 });
+      else b.line([{ text: ln, size: 10, color: C.body }], { spaceAfter: 1 });
+    }
   }
 
   // Footer

@@ -24,6 +24,7 @@ export async function uploadNotes(m: MeetingRecord, notes: GeminiNotes): Promise
     attendees: [...new Set(m.attendees ?? [])],
     eventUrl: `https://meet.google.com/${m.nativeId}`,
     folderId,
+    transcript: m.transcript ?? null,
   });
   m.noteDocUrl = url;
   m.titleEn = m.title; // заметки на английском, заголовок = имя мита
