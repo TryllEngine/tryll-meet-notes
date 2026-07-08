@@ -8,7 +8,10 @@
 #
 # Профиль (/master-profile) сюда НЕ вшиваем — он живёт в отдельном volume,
 # чтобы переживать и пересоздание, и пересборку образа.
-FROM vexaai/vexa-lite:latest
+# Пиннинг по digest: latest может уехать и сломать строковые анкеры патчей.
+# Это ровно тот образ, что проверен в проде на 2026-07-08. При осознанном
+# апгрейде Vexa: обновить digest + перепроверить/поправить анкеры всех патчей.
+FROM vexaai/vexa-lite@sha256:4752bc3cfe4c6a9a334018fe3f7c6a21f56616cd1de370d0c2c9f577206a36ec
 
 COPY patch_vexa_auth.py patch-vexa-speaker.py patch-vexa-leave.py /tryll-patches/
 COPY vexa-image/patch-vexa-display-build.py vexa-image/patch-vexa-camera-build.py vexa-image/patch-vexa-writeback-build.py vexa-image/patch-vexa-accountchooser-build.py vexa-image/patch-vexa-cameralogo-build.py vexa-image/patch-vexa-speaker-fuzz-build.py /tryll-patches/
