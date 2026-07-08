@@ -181,14 +181,18 @@ function render(){
   load().then(draw);
 }
 
-function layout(evs){ // простая раскладка пересечений в колонке
-  evs.sort((a,b)=>new Date(a.start)-new Date(b.start));
-  const cols=[];
-  evs.forEach(e=>{e._s=new Date(e.start);e._e=new Date(e.end);
-    let placed=false;
-    for(const col of cols){if(col[col.length-1]._e<=e._s){col.push(e);e._col=cols.indexOf(col);placed=true;break}}
-    if(!placed){e._col=cols.length;cols.push([e])}});
-  evs.forEach(e=>e._cols=cols.length);
+function layout(evs){ // раскладка как в Google Calendar: кластеры пересечений
+  evs.forEach(e=>{e._s=+new Date(e.start);e._e=Math.max(+new Date(e.end),e._s+60000)});
+  evs.sort((a,b)=>a._s-b._s||a._e-b._e);
+  let cluster=[],colEnds=[],clusterEnd=-1;
+  const flush=()=>{const n=colEnds.length||1;cluster.forEach(e=>e._cols=n);cluster=[];colEnds=[];};
+  evs.forEach(e=>{
+    if(cluster.length&&e._s>=clusterEnd){flush();clusterEnd=-1;} // событие не пересекается с кластером → закрываем
+    let col=colEnds.findIndex(end=>end<=e._s);              // первая свободная колонка
+    if(col===-1){col=colEnds.length;colEnds.push(e._e);}else{colEnds[col]=e._e;}
+    e._col=col;cluster.push(e);clusterEnd=Math.max(clusterEnd,e._e);
+  });
+  flush();
   return evs;
 }
 
@@ -209,9 +213,13 @@ function draw(){
       if(mins>=0&&mins<=hours*PXH)h+=`<div class="nowline" style="top:${mins}px"></div>`}
     dayEvs.forEach((e,idx)=>{
       const s=new Date(e.start),en=new Date(e.end);
+      const laneH=hours*PXH;
       let top=(s.getHours()+s.getMinutes()/60-DAY_START)*PXH;
       let hgt=Math.max(((en-s)/3600000)*PXH-2,22);
       if(top<0){hgt+=top;top=0}
+      if(top>laneH-18)top=laneH-18;          // событие позже сетки — не торчит вниз
+      if(top+hgt>laneH)hgt=laneH-top;         // не вылезает за низ
+      if(hgt<18)hgt=18;
       const w=100/e._cols, left=e._col*w;
       const st=STATUS[e.botStatus]||STATUS.none;
       const hasBot=e.botStatus!=="none";
