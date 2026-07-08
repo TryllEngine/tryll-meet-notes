@@ -18,7 +18,7 @@ docker rm   vexa-lite 2>/dev/null || true
 docker run -d --name vexa-lite \
   --network vexa-network \
   --restart unless-stopped \
-  -p 3000:3000 -p 8056:8056 -p 8057:8057 \
+  -p 127.0.0.1:3000:3000 -p 127.0.0.1:8056:8056 -p 127.0.0.1:8057:8057 \
   --shm-size=2g \
   --env-file vexa.env \
   --env-file scripts/vexa-image/.vexa-secret.env \
