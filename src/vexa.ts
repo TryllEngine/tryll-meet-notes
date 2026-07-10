@@ -104,6 +104,7 @@ interface TranscriptSegment {
   speaker?: string | null;
   text?: string | null;
   absolute_start_time?: string | null;
+  absolute_end_time?: string | null;
 }
 
 /**
@@ -119,20 +120,16 @@ export async function getTranscript(nativeId: string): Promise<string | null> {
   if (segments.length === 0) return null;
 
   const lines: string[] = [];
-  let prevSpeaker = "";
   for (const s of segments) {
     const text = (s.text ?? "").trim();
     if (!text) continue;
     const speaker = (s.speaker ?? "Unknown").trim();
-    if (speaker === prevSpeaker && lines.length > 0) {
-      lines[lines.length - 1] += ` ${text}`;
-    } else {
-      // Таймкод начала реплики в CEST ([HH:MM]) — для навигации по записи.
-      // Срезается перед отправкой в Claude (notes-gemini), в заметках не влияет.
-      const tc = fmtCEST(s.absolute_start_time);
-      lines.push(`${tc ? `[${tc}] ` : ""}${speaker}: ${text}`);
-      prevSpeaker = speaker;
-    }
+    // Preserve Vexa's turn boundary. Equal adjacent labels can still be
+    // independent or overlapping channel turns and must not be concatenated.
+    const start = fmtCEST(s.absolute_start_time);
+    const end = fmtCEST(s.absolute_end_time);
+    const tc = start ? (end && end !== start ? `${start}–${end}` : start) : "";
+    lines.push(`${tc ? `[${tc}] ` : ""}${speaker || "Unknown"}: ${text}`);
   }
   return lines.length > 0 ? lines.join("\n") : null;
 }
@@ -142,5 +139,11 @@ function fmtCEST(iso?: string | null): string {
   if (!iso) return "";
   const d = new Date(iso);
   if (isNaN(d.getTime())) return "";
-  return new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Berlin", hour: "2-digit", minute: "2-digit", hour12: false }).format(d);
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Berlin",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(d);
 }

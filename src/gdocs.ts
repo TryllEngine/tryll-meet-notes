@@ -140,7 +140,7 @@ export async function createGeminiDoc(opts: {
       const ln = raw.trim();
       if (!ln) continue;
       // "[HH:MM] Спикер: реплика" — таймкод (CEST) опционален
-      const m = ln.match(/^(?:\[(\d{1,2}:\d{2})\]\s*)?([^:]{1,60}):\s*(.*)$/);
+      const m = ln.match(/^(?:\[([\d:]{5,8}(?:–[\d:]{5,8})?)\]\s*)?([^:]{1,60}):\s*(.*)$/);
       if (m && m[3]) {
         const runs: Run[] = [];
         if (m[1]) runs.push({ text: `${m[1]}  `, size: 9, color: C.faint }); // таймкод — серым, ненавязчиво
