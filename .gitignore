@@ -3,6 +3,8 @@ node_modules/
 .env
 .env.local
 *.log
+__pycache__/
+*.pyc
 dist/
 recordings/
 scripts/login-helper/build.err
