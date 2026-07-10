@@ -29,3 +29,14 @@ function loadTeamContext(): string {
 }
 
 export const TEAM_CONTEXT = loadTeamContext();
+
+/**
+ * Notes may use company context for terminology, but never for speaker identity.
+ * Identity-disambiguation blocks intentionally stay out of the notes prompt: a
+ * topic or role is not evidence that a particular person said the words.
+ */
+export function teamContextForNotes(context: string = TEAM_CONTEXT): string {
+  const lines = context.split(/\r?\n/);
+  const marker = lines.findIndex((line) => /^\s*NAME\s+DISAMBIGUATION\b/i.test(line));
+  return (marker < 0 ? lines : lines.slice(0, marker)).join("\n").trim();
+}

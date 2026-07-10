@@ -1,5 +1,5 @@
 import { spawn } from "child_process";
-import { TEAM_CONTEXT } from "./context";
+import { teamContextForNotes } from "./context";
 
 /**
  * Заметки в стиле «Notes by Gemini» — ВСЕГДА на английском, структура 1:1:
@@ -33,7 +33,7 @@ Return ONLY valid JSON (no markdown, no commentary), exactly this shape:
     {"title": "Short topic title", "desc": "One sentence: what still needs discussion / is undecided"}
   ],
   "next_steps": [
-    {"owner": "Person name (or 'The group')", "title": "Short action title (1-3 words)", "task": "One sentence: the concrete task"}
+    {"owner": "Exact transcript speaker label, 'The group', or 'Unassigned'", "title": "Short action title (1-3 words)", "task": "One sentence: the concrete task"}
   ],
   "details": [
     {"topic": "Short topic title", "text": "A detailed paragraph (2-5 sentences) on this discussion point, who said what"}
@@ -43,11 +43,53 @@ Return ONLY valid JSON (no markdown, no commentary), exactly this shape:
 Rules:
 - 2-4 summary_sections, each a real theme from the call.
 - decisions_aligned = things the team agreed on; decisions_open = things left undecided / to discuss. Either may be empty [].
-- next_steps: concrete action items with an owner. Owner is a person's name from the transcript (or "The group").
-- details: one bullet per distinct discussion topic, in chronological-ish order, like Gemini's "Details" section.
+- next_steps: include concrete action items only. Copy an owner exactly from a speaker label only when the transcript explicitly assigns that task. Otherwise use "Unassigned". Never infer an owner from role, topic, calendar attendees, or company context.
+- details: one bullet per distinct discussion topic, in chronological-ish order, like Gemini's "Details" section. Do not claim that a named person said something unless that exact name labels the source transcript line.
 - Everything in English. Keep proper names/brands as-is.
-- A CONTEXT block (company & team) is provided below ONLY to spell names/roles correctly and understand terms. Base ALL notes strictly on the transcript — never add facts that weren't said. Note: a participant literally named "Tryll Engine" is the recording bot, not a person — ignore it / never treat it as a speaker.
-- A PARTICIPANTS list (from the calendar invite) is provided — these are the ONLY people in the meeting. The transcript's speaker labels come from imperfect diarization and may be WRONG or SPLIT (one real person shown as two speakers, e.g. their name + "Tryll Engine"). Reconcile EVERY speaker to someone on the participants list. NEVER invent a participant and NEVER assign a next-step to a name that isn't on the list. If a name is spoken but not on the list, it's a person being discussed (a mention), not an attendee — don't attribute tasks to them.`;
+- Speaker labels are immutable evidence supplied by the transcription pipeline. NEVER rename, merge, reconcile, expand, or replace a speaker label. "Sasha" must stay "Sasha"; do not turn it into a surname. "Unknown" must stay unattributed.
+- A CONTEXT block is provided only for company terminology and spelling. It is NEVER identity evidence and must not be used to decide who spoke or owns an action. Base ALL notes strictly on the transcript. A participant literally named "Tryll Engine" is the recording bot, not a person — ignore it.
+- A PARTICIPANTS list is reference metadata only. It is not evidence that someone spoke and must never be used to relabel a speaker or infer an action owner.`;
+
+const TRANSCRIPT_LINE = /^(?:\[[^\]]+\]\s*)?([^:]{1,80}):\s*(.*)$/;
+
+export function transcriptSpeakerLabels(transcript: string): string[] {
+  const labels = new Map<string, string>();
+  for (const raw of transcript.split(/\r?\n/)) {
+    const match = raw.trim().match(TRANSCRIPT_LINE);
+    if (!match) continue;
+    const label = match[1].trim();
+    const key = label.toLocaleLowerCase();
+    if (!label || key === "unknown" || key === "tryll engine") continue;
+    if (!labels.has(key)) labels.set(key, label);
+  }
+  return [...labels.values()];
+}
+
+/** Enforce the identity boundary even if the model ignores the prompt. */
+export function enforceNoteIdentity(notes: GeminiNotes, transcript: string): GeminiNotes {
+  const exactLabels = new Map(
+    transcriptSpeakerLabels(transcript).map((label) => [label.toLocaleLowerCase(), label]),
+  );
+  const next_steps = (notes.next_steps ?? []).map((step) => {
+    const owner = (step.owner ?? "").trim();
+    const key = owner.toLocaleLowerCase();
+    if (key === "the group") return { ...step, owner: "The group" };
+    if (key === "unassigned" || !exactLabels.has(key)) return { ...step, owner: "Unassigned" };
+    return { ...step, owner: exactLabels.get(key)! };
+  });
+  return { ...notes, next_steps };
+}
+
+export function buildNotesPrompt(
+  title: string,
+  dateISO: string,
+  transcript: string,
+  attendees: string[] = [],
+): string {
+  const people = attendees.length ? attendees.join(", ") : "(not provided)";
+  const transcriptForNotes = transcript.replace(/^\[[^\]]+\]\s*/gm, "");
+  return `${INSTRUCTION}\n\n=== CONTEXT (terminology only; NEVER identity evidence) ===\n${teamContextForNotes()}\n\n=== PARTICIPANTS (reference metadata only) ===\n${people}\n\n=== MEETING ===\nMeeting: «${title}», date: ${dateISO.slice(0, 10)}.\n\nTranscript (speaker labels are immutable):\n\n${transcriptForNotes}`;
+}
 
 function runClaude(stdinText: string, timeoutMs: number): Promise<string> {
   const model = process.env.NOTES_CLI_MODEL || "sonnet";
@@ -88,16 +130,12 @@ export async function generateGeminiNotesViaCli(
   transcript: string,
   attendees: string[] = [],
 ): Promise<GeminiNotes> {
-  const people = attendees.length ? attendees.join(", ") : "(not provided)";
-  // Срезаем таймкоды "[HH:MM] " из начала реплик — Claude получает ровно тот же
-  // формат "Name: line", что и раньше (таймкоды нужны только для дока, не для заметок).
-  const transcriptForNotes = transcript.replace(/^\[\d{1,2}:\d{2}\]\s*/gm, "");
-  const prompt = `${INSTRUCTION}\n\n=== CONTEXT (reference only) ===\n${TEAM_CONTEXT}\n\n=== PARTICIPANTS (calendar invite — the ONLY people in this meeting) ===\n${people}\n\n=== MEETING ===\nMeeting: «${title}», date: ${dateISO.slice(0, 10)}.\n\nTranscript (format "Name: line"; speaker labels may be wrong/split — reconcile to participants):\n\n${transcriptForNotes}`;
+  const prompt = buildNotesPrompt(title, dateISO, transcript, attendees);
   const raw = await runClaude(prompt, 10 * 60_000);
   const idx = raw.indexOf('{"type":"result"');
   const jsonStart = idx >= 0 ? idx : raw.indexOf("{");
   if (jsonStart < 0) throw new Error(`claude CLI non-JSON: ${raw.slice(0, 300)}`);
   const env = JSON.parse(raw.slice(jsonStart)) as { is_error?: boolean; result?: string };
   if (env.is_error || !env.result) throw new Error(`claude CLI error: ${env.result ?? raw.slice(0, 300)}`);
-  return JSON.parse(extractJson(env.result)) as GeminiNotes;
+  return enforceNoteIdentity(JSON.parse(extractJson(env.result)) as GeminiNotes, transcript);
 }
