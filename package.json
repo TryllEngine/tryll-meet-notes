@@ -5,6 +5,9 @@
   "description": "Calendar-driven meeting bot: joins Google Meet via Vexa, transcribes with speakers, generates notes with Claude, saves .docx to Google Drive",
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "test:identity": "tsx scripts/test-identity-preserving.ts",
+    "test:gmeet-turns": "node scripts/vexa-image/test-gmeet-turn-attribution.cjs",
+    "test:vexa-patch": "python scripts/vexa-image/test-vexa-gmeet-turns-patch.py",
     "local": "tsx scripts/local.ts"
   },
   "dependencies": {
