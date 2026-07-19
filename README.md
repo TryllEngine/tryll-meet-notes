@@ -126,8 +126,10 @@ flowchart TD
     N --> G["notes → Drive → email"]
 ```
 
-- **Joins 5 min before** the scheduled start; under a company Google account it is
-  **auto-admitted** (no waiting room).
+- **Joins 5 min before** the scheduled start under the company Google account
+  (`socials@`). **Internal meetings** (organiser `@tryllengine`) → **auto-admitted**
+  via *Join now* (no waiting room). **External meetings** (someone else's org) →
+  the bot clicks **Ask to join** and waits in the lobby until the **host admits** it.
 - **Nobody within 10 min** → leaves, no notes, frees the slot.
 - **Everyone leaves**, bot alone **3 min** → leaves and makes notes.
 - **Kicked** → leaves immediately, frees the slot, notes from what was captured,
@@ -159,15 +161,19 @@ re-joins a meeting it already handled.
   email TL;DR are always in **English**.
 - Sections: TL;DR · decisions · action items (`owner → task → due`) · open
   questions · discussion summary · full transcript.
-- Saved to Drive as a native Google Doc, organised by series:
+- Saved to Drive as a native Google Doc, filed into the **"Notesnew"** folder tree
+  by **smart routing** (`src/folder-router.ts`), run after the note is generated:
+  1. **Hard rules** (deterministic, no LLM) for recurring meetings —
+     `Sync Tryll → 00_Company/All-Hands`, `Marketing Catch up → 04_GTM/GTM Sync`
+     (extend `HARD_RULES`).
+  2. Otherwise **Claude picks the folder**: it gets the *live* folder tree
+     (paths + ids, fetched from Drive every time, so new folders are picked up
+     automatically) plus the meeting title and summary, and returns a folder id.
+  3. **Fallback → `07_Inbox`** when there's no confident match. `chooseNoteFolder`
+     never throws.
 
-```
-Drive root/
-├── Sync Tryll/
-│   └── Sync Tryll - 2026-06-22
-└── One-off meetings/
-    └── Partner call - 2026-06-08
-```
+  The service account needs Editor access to the Notesnew root. Env overrides:
+  `NOTES_ROOT_FOLDER_ID`, `NOTES_INBOX_FOLDER_ID`, `FOLDER_CLI_MODEL`.
 
 - The email is a branded HTML card (logo, "Open meeting notes" button, English
   TL;DR, signature). Sent **only to attendees on the company domain** — external
@@ -185,8 +191,9 @@ used instead.
 | Container | Role |
 |-----------|------|
 | `tryll-runner` | Orchestrator (this repo) |
-| `vexa-lite` + `vexa-postgres` | [Vexa](https://github.com/Vexa-ai/vexa) self-hosted meeting bot |
+| `vexa-lite` + `vexa-postgres` | [Vexa](https://github.com/Vexa-ai/vexa) self-hosted meeting bot + transcript DB |
 | `transcription-lb` + workers | Self-hosted Whisper (`large-v3-turbo`, GPU) |
+| `tryll-dashboard` | Week calendar UI at `127.0.0.1:8090` — bot statuses, note links, "re-dispatch / block bot" (read-only to the store) |
 
 TypeScript, run directly with `tsx` (no build step):
 
@@ -195,13 +202,21 @@ TypeScript, run directly with `tsx` (no build step):
 | `src/calendar.ts` | Google Calendar polling, Meet-code dedup, attendees |
 | `src/vexa.ts` | Vexa REST client + leave timeouts |
 | `src/core.ts` | Orchestrator: dispatch / collect / notes |
-| `src/notes.ts`, `src/notes-cli.ts` | Notes via Claude API / Claude CLI |
-| `src/docx.ts`, `src/drive.ts` | Document build + Drive upload (Google Doc) |
-| `src/email.ts`, `src/finalize.ts` | Summary email + idempotent finalize |
-| `src/store.ts` | Persistent state |
+| `src/notes-gemini.ts` | Notes via Claude CLI (`claude -p`), "Notes by Gemini" structure |
+| `src/gdocs.ts` | Renders the native Google Doc (Docs API) + full transcript |
+| `src/folder-router.ts` | **Smart folder routing** — hard rules → Claude → Inbox fallback |
+| `src/email.ts`, `src/finalize.ts` | Summary email + idempotent finalize (folder + doc + email) |
+| `src/store.ts` | Persistent state (file store / optional Redis) |
 
-Vexa runs with small local patches (`scripts/patch_*`): authenticated join under
-a domain profile, an avatar camera, and robust leave detection.
+> Legacy `.docx` path (`src/notes.ts`, `src/notes-cli.ts`, `src/docx.ts`,
+> `src/drive.ts`) is kept for dev scripts but not used by the live pipeline.
+
+Vexa runs from a custom image (`tryll-vexa-lite`, built via
+`scripts/vexa-image/Dockerfile`) with the Tryll patches **baked in** (sources in
+`scripts/`): authenticated join + Google auth-screen auto-pass, **Ask to join** for
+externally-organised meetings, fuzzy speaker mapping (DOM-highlight lag, vexa#191),
+skip-self diarization, leave guard, avatar camera, stale X-lock cleanup, and cookie
+write-back. When bumping the base Vexa image, re-verify the patch anchors.
 
 ## Configuration
 
@@ -214,8 +229,10 @@ Copy `.env.example` → `.env` and fill it in:
 | `VEXA_BASE_URL` · `VEXA_API_KEY` | Vexa endpoint and key |
 | `BOT_AUTHENTICATED` · `BOT_AVATAR_URL` | Domain auto-admit + bot avatar |
 | `NOTES_MODE` | `cli` (Claude subscription) or `api` (`ANTHROPIC_API_KEY`) |
+| `NOTES_CLI_MODEL` · `FOLDER_CLI_MODEL` | Claude model for notes / folder choice (default `sonnet`) |
 | `NOTES_EMAIL` · `NOTES_EMAIL_FROM` · `COMPANY_DOMAIN` | Auto-email of notes |
-| `DRIVE_ROOT_FOLDER_ID` | Drive folder for the notes tree |
+| `NOTES_ROOT_FOLDER_ID` · `NOTES_INBOX_FOLDER_ID` | Notesnew root + Inbox fallback for smart routing (defaults baked into `folder-router.ts`) |
+| `BOT_GOOGLE_PASSWORD` | `socials@` password for auto-passing Google auth screens (secret file) |
 | `MAX_CONCURRENT_BOTS` · `STARTUP_SKIP_MIN` | Concurrency limit / startup-skip threshold |
 
 Opt a meeting out of recording by adding `[norec]` to its calendar title.
@@ -229,3 +246,23 @@ docker logs -f tryll-runner       # watch activity
 
 The runner attaches to the same Docker network as Vexa and ticks automatically.
 For a plain local run without a container: `npm install && npm run local`.
+
+The bot image (patches baked in) is built separately:
+
+```bash
+docker build -f scripts/vexa-image/Dockerfile -t tryll-vexa-lite:latest scripts
+bash scripts/vexa-image/run-vexa-lite.sh          # recreate vexa-lite (needs vexa.env)
+```
+
+### Operations
+
+- **Morning check:** `bash scripts/meet-check.sh` — containers/health, patches, Vexa
+  API, Claude token, clears stale X-locks; prints "🟢 READY" or ❌.
+- **Dashboard:** `http://127.0.0.1:8090` — re-dispatch a bot or mark a meeting "block bot".
+- **Manual note recovery** (meeting recorded but the note never generated): the
+  transcript lives in `vexa-postgres`; export it and run `scripts/recover-meeting.ts`
+  (`TRANSCRIPT_FILE`, `STORE_KEY`, `NATIVE`; emails only with the `send` arg). It files
+  the note into Notesnew through the same smart router.
+- **Re-login `socials@`** (Google "verify it's you"): use the `tryll-login-helper`
+  (noVNC on `:6080`, Chrome 131 — compatible with the bot engine), then load the profile
+  into the `vexa-master-profile` volume.
