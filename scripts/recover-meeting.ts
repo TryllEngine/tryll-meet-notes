@@ -14,7 +14,7 @@ import { readFileSync, writeFileSync, renameSync } from "fs";
 import { generateGeminiNotesViaCli } from "../src/notes-gemini";
 import { createGeminiDoc } from "../src/gdocs";
 import { sendNotesEmail, filterDomainRecipients } from "../src/email";
-import { resolveSeriesFolder } from "../src/drive";
+import { chooseNoteFolder } from "../src/folder-router";
 
 const TRANSCRIPT_FILE = process.env.TRANSCRIPT_FILE!;
 const STORE_KEY = process.env.STORE_KEY!;
@@ -49,7 +49,11 @@ async function main() {
 
   // 4) док на Drive (с полным транскриптом; при сбое batchUpdate — без него)
   let folderId: string | null = null;
-  try { folderId = await resolveSeriesFolder(rec.seriesName || title); } catch {}
+  try {
+    const hint = [notes.summary_intro, ...(notes.summary_sections || []).map((s: any) => s.heading)].filter(Boolean).join("; ");
+    const c = await chooseNoteFolder(title, hint);
+    folderId = c.folderId; console.log("папка (умный роутер):", c.reason);
+  } catch {}
   let url: string;
   try {
     ({ url } = await createGeminiDoc({ meeting: title, dateISO, notes, attendees, eventUrl: `https://meet.google.com/${NATIVE}`, folderId, transcript }));
