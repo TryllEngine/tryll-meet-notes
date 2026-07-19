@@ -1,5 +1,5 @@
-import { resolveSeriesFolder } from "./drive";
 import { filterDomainRecipients, sendNotesEmail } from "./email";
+import { chooseNoteFolder } from "./folder-router";
 import { createGeminiDoc } from "./gdocs";
 import type { GeminiNotes } from "./notes-gemini";
 import { MeetingRecord, saveMeeting, unmarkPending } from "./store";
@@ -11,12 +11,13 @@ import { MeetingRecord, saveMeeting, unmarkPending } from "./store";
  */
 export async function uploadNotes(m: MeetingRecord, notes: GeminiNotes): Promise<string> {
   if (m.noteDocUrl) return m.noteDocUrl;
-  let folderId: string | null = null;
-  try {
-    folderId = await resolveSeriesFolder(m.seriesName);
-  } catch {
-    /* папка недоступна — док останется в My Drive */
-  }
+  // Умный выбор папки (Notesnew): жёсткие правила → Claude → фолбэк 07_Inbox.
+  // chooseNoteFolder никогда не бросает (в худшем случае вернёт Inbox).
+  const summaryHint = [notes.summary_intro, ...(notes.summary_sections ?? []).map((s) => s.heading)]
+    .filter(Boolean)
+    .join("; ");
+  const { folderId, reason } = await chooseNoteFolder(m.title, summaryHint);
+  console.log(`folder-router: «${m.title}» → ${reason}`);
   const { url } = await createGeminiDoc({
     meeting: m.title,
     dateISO: m.startISO,
