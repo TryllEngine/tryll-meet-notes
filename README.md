@@ -218,6 +218,34 @@ externally-organised meetings, fuzzy speaker mapping (DOM-highlight lag, vexa#19
 skip-self diarization, leave guard, avatar camera, stale X-lock cleanup, and cookie
 write-back. When bumping the base Vexa image, re-verify the patch anchors.
 
+## Repo layout
+
+```
+.
+├── src/                     # runner — TypeScript, run with tsx (no build step)
+│   ├── core.ts              #   orchestrator tick: dispatch / collect / notes
+│   ├── calendar.ts vexa.ts store.ts
+│   ├── notes-gemini.ts gdocs.ts folder-router.ts   # notes + smart Drive routing
+│   ├── finalize.ts email.ts google.ts drive.ts context.ts
+│   └── notes.ts notes-cli.ts docx.ts               # legacy .docx path (unused)
+├── scripts/
+│   ├── local.ts             # runner entrypoint (Docker CMD)
+│   ├── meet-check.sh        # morning health check
+│   ├── recover-meeting.ts send-note-email.ts        # ops / note recovery
+│   ├── patch-vexa-*.py|sh   # patch sources
+│   ├── login-helper/        # noVNC Chrome for re-login of socials@
+│   └── vexa-image/          # custom bot image: Dockerfile + baked patches
+├── dashboard/               # week-calendar UI (Node http + googleapis)
+├── assets/                  # bot avatar, email signature
+├── docs/                    # PLAN.md (historical), TEST-MEETING.md
+├── api/  vercel.json        # legacy Vercel functions (unused — self-hosted now)
+├── Dockerfile               # runner image
+└── docker-compose.yml       # runner + dashboard
+```
+
+Historical design notes live in [docs/PLAN.md](docs/PLAN.md); the live-meeting test
+checklist is [docs/TEST-MEETING.md](docs/TEST-MEETING.md).
+
 ## Configuration
 
 Copy `.env.example` → `.env` and fill it in:
@@ -234,8 +262,12 @@ Copy `.env.example` → `.env` and fill it in:
 | `NOTES_ROOT_FOLDER_ID` · `NOTES_INBOX_FOLDER_ID` | Notesnew root + Inbox fallback for smart routing (defaults baked into `folder-router.ts`) |
 | `BOT_GOOGLE_PASSWORD` | `socials@` password for auto-passing Google auth screens (secret file) |
 | `MAX_CONCURRENT_BOTS` · `STARTUP_SKIP_MIN` | Concurrency limit / startup-skip threshold |
+| `HARD_MAX_MIN` | Runner backstop for a stuck bot (default 185 min, just after Vexa's 3h cap) |
 
-Opt a meeting out of recording by adding `[norec]` to its calendar title.
+Bot max lifetime is **3h** (`automatic_leave.max_bot_time` in `src/vexa.ts`); a single
+long meeting in progress can be extended live by cancelling its stop-job — see
+[Operations](#operations). Opt a meeting out of recording by adding `[norec]` to its
+calendar title.
 
 ## Run
 
@@ -266,3 +298,7 @@ bash scripts/vexa-image/run-vexa-lite.sh          # recreate vexa-lite (needs ve
 - **Re-login `socials@`** (Google "verify it's you"): use the `tryll-login-helper`
   (noVNC on `:6080`, Chrome 131 — compatible with the bot engine), then load the profile
   into the `vexa-master-profile` volume.
+- **Extend a running meeting past the 3h cap** (without dropping the recording): cancel
+  its stop-job in Vexa's scheduler — inside `vexa-lite`, `GET :8090/scheduler/jobs` to find
+  the job whose request URL is `/bots/internal/timeout/<meeting_id>`, then
+  `DELETE :8090/scheduler/jobs/<job_id>`. Cancelling a stop-job never breaks the recording.
