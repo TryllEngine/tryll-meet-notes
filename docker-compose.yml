@@ -18,6 +18,10 @@ services:
       # иначе бот возвращается на мит после кика
       STORE_FILE: /data/store.json
       SKIP_FILE: /cmd/skip.json
+      # Дальний backstop раннера (форс-стоп зависших ботов). Держим ЧУТЬ ПОЗЖЕ
+      # Vexa-лимита max_bot_time (3ч от захода ≈ старт+175мин), чтобы раннер не
+      # срезал бота раньше Vexa. 185 мин от старта мита = запас ~10 мин. (2026-07-30)
+      HARD_MAX_MIN: "185"
     volumes:
       - runner-data:/data
       - tryll-cmd:/cmd
