@@ -73,9 +73,15 @@ async function liveBots() {
 }
 
 /** Статус бота для мита: live / done / failed / skipped / pending / none. */
-function botStatus(rec, isLive) {
+function botStatus(rec, isLive, evStart) {
   if (isLive) return "live";
   if (!rec) return "none";
+  // Перенос мита: тот же eventId, но время старта в календаре ≠ сохранённому, а
+  // прошлый исход был «несостоявшийся» (failed/skipped) → бот зайдёт заново на новую
+  // дату (см. core.ts dispatchBots). Не показываем красным — показываем «в работе».
+  if ((rec.status === "failed" || rec.status === "skipped") && evStart && rec.startISO && rec.startISO !== evStart) {
+    return "pending";
+  }
   if (rec.status === "done") return "done";
   if (rec.status === "failed") return "failed";
   if (rec.status === "skipped") return "skipped";
@@ -137,7 +143,7 @@ async function getMeetings(fromISO, toISO) {
       organizer,
       externalOrganizer: !!external,
       attendees,
-      botStatus: manualSkip ? "skipped" : botStatus(rec, isLive),
+      botStatus: manualSkip ? "skipped" : botStatus(rec, isLive, ev.start.dateTime),
       manualSkip,
       noteUrl: rec?.noteDocUrl || null,
       error: rec?.error || null,
