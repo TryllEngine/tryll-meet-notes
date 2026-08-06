@@ -79,7 +79,18 @@ async function dispatchBots(log: string[], running: Map<string, number>, skip: S
   const used = await usedSlots(running);
 
   for (const m of meetings) {
-    if (await getMeeting(m.eventId)) continue; // уже обработан/обрабатывается
+    // Дедуп по eventId — НО с распознаванием ПЕРЕНОСА мита. Если мит перенесли на
+    // новое время (тот же eventId, но startISO изменился), а прошлый исход был
+    // «несостоявшийся» (failed/skipped) — значит его просто подвинули на другую
+    // дату, заходим заново. Записанные (done) и активные (joining/awaiting_notes)
+    // НЕ перезапускаем. Ручной «Бота не впускать» (skip) остаётся сильнее (ниже).
+    const existing = await getMeeting(m.eventId);
+    if (existing) {
+      const rescheduled = existing.startISO !== m.startISO;
+      const retryable = existing.status === "failed" || existing.status === "skipped";
+      if (!(rescheduled && retryable)) continue; // не перенос / уже записан / идёт → как раньше
+      log.push(`rescheduled → re-dispatch: ${m.title} (${existing.startISO} → ${m.startISO})`);
+    }
     if (skip.has(m.eventId)) continue; // помечен «бота не впускать» (можно вернуть — запись не сохраняем)
     // Пробуждение раннера: мит уже шёл ДО старта раннера и идёт дольше порога →
     // не заходим (бот пришёл бы под конец). Помечаем skipped, чтобы не дёргать
