@@ -77,10 +77,12 @@ function botStatus(rec, isLive, evStart) {
   if (isLive) return "live";
   if (!rec) return "none";
   // Перенос мита: тот же eventId, но время старта в календаре ≠ сохранённому, а
-  // прошлый исход был «несостоявшийся» (failed/skipped) → бот зайдёт заново на новую
-  // дату (см. core.ts dispatchBots). Не показываем красным — показываем «в работе».
+  // прошлый исход был «несостоявшийся» (failed/skipped) → мит подвинули, старый
+  // провал уже неактуален, а бот зайдёт заново по новому времени (см. core.ts).
+  // Показываем НЕЙТРАЛЬНО «нет бота» (не красным «не записан» и не «в работе» —
+  // мит ещё не идёт). Когда подойдёт время, раннер отправит бота → станет live.
   if ((rec.status === "failed" || rec.status === "skipped") && evStart && rec.startISO && rec.startISO !== evStart) {
-    return "pending";
+    return "none";
   }
   if (rec.status === "done") return "done";
   if (rec.status === "failed") return "failed";
