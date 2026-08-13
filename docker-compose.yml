@@ -52,6 +52,19 @@ services:
     networks:
       - vexa-network
 
+  # Watchdog: следит за runtime_api ВНУТРИ vexa-lite (движок, что запускает ботов)
+  # и перезапускает vexa-lite, если тот умер (healthcheck контейнера этого не
+  # видит). + раз в ~12ч чистит старые записи. Лечит «включил Docker, а бот не
+  # заходит» после ребута ПК. Нужен доступ к docker.sock (локальный self-hosted).
+  watchdog:
+    image: docker:cli
+    container_name: tryll-watchdog
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./scripts/watchdog.sh:/watchdog.sh:ro
+    entrypoint: ["sh", "/watchdog.sh"]
+
 volumes:
   runner-data:
   tryll-cmd:
