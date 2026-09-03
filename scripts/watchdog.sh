@@ -39,7 +39,37 @@ while true; do
     fi
   fi
 
-  # 2) Периодическая чистка старых записей (профилактика раздутия)
+  # 2) Осиротевшие Xvfb внутри vexa-lite (каждые ~10 мин)
+  #
+  # ЗАЧЕМ: bot-slot-wrapper.sh поднимает на каждого бота свой Xvfb (:101-:199) и
+  # делает exec на настоящий entrypoint — из-за exec обёртка исчезает и УБИТЬ свой
+  # Xvfb после бота уже некому. Патч tryll-clean-stale-x их не трогает: он сносит
+  # только локи МЁРТВЫХ процессов, а эти живые. Итог (03.09.2026): 50 висящих Xvfb,
+  # ~70 МБ каждый, и 50 занятых слотов из 99 — ещё столько же ботов, и новые
+  # перестали бы стартовать вообще. Плюс память: в тот день боту не хватило её на
+  # 2-м часу и у него встало аудио.
+  #
+  # КАК: дисплей считается занятым, если его держит живой chrome (DISPLAY в
+  # /proc/PID/environ). Xvfb на всех остальных дисплеях — сирота: гасим и убираем
+  # лок с сокетом. Живого бота это не задевает.
+  if [ "$((ITER % 10))" -eq 0 ]; then
+    docker exec vexa-lite sh -c '
+      used=$(for p in $(ps -o pid= -C chrome 2>/dev/null); do tr "\0" "\n" < /proc/$p/environ 2>/dev/null | sed -n "s/^DISPLAY=//p"; done | sort -u | tr "\n" " ")
+      killed=0
+      for pid in $(ps -o pid= -C Xvfb 2>/dev/null); do
+        d=$(tr "\0" " " < /proc/$pid/cmdline 2>/dev/null | grep -o ":[0-9][0-9]*" | head -1)
+        [ -z "$d" ] && continue
+        case " $used " in *" $d "*) continue;; esac
+        kill "$pid" 2>/dev/null && killed=$((killed+1))
+        n=${d#:}
+        rm -f "/tmp/.X$n-lock" "/tmp/.X11-unix/X$n" 2>/dev/null
+      done
+      [ "$killed" -gt 0 ] && echo "reaped $killed orphan Xvfb"
+      exit 0
+    ' 2>/dev/null | while read -r l; do echo "$(date -u) $l"; done
+  fi
+
+  # 3) Периодическая чистка старых записей (профилактика раздутия)
   if [ "$((ITER % CLEAN_EVERY))" -eq 0 ]; then
     echo "$(date -u) чищу записи старше 5 дней"
     docker exec vexa-lite sh -c 'find /var/lib/vexa/recordings/recordings -type f -mtime +5 -delete 2>/dev/null; find /var/lib/vexa/recordings/recordings -mindepth 1 -type d -empty -delete 2>/dev/null' || true
