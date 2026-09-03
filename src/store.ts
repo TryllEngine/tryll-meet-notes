@@ -46,6 +46,13 @@ export interface MeetingRecord {
   everHadAudio?: boolean;
   /** сколько раз переотправляли бота после краша на старте (Chrome/Xvfb гонка) */
   launchRetries?: number;
+  /** сколько раз бота возвращали в мит после зависания аудио (см. reviveRetries в core) */
+  reviveRetries?: number;
+  /** Транскрипт ПРЕДЫДУЩИХ сессий этого мита. Vexa отдаёт /transcripts только по
+   *  ПОСЛЕДНЕЙ сессии, поэтому перед каждой переотправкой бота текущий транскрипт
+   *  сохраняем сюда, а при финальном сборе склеиваем carry + последнюю сессию.
+   *  Без этого автовозврат бота молча терял начало мита. */
+  transcriptCarry?: string;
 }
 
 const ACTIVE = "meetings:active";

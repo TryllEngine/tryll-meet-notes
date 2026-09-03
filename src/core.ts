@@ -29,6 +29,12 @@ const HARD_MAX_MS = Number(process.env.HARD_MAX_MIN || 150) * 60_000;
 // Бот упал на старте (Chrome/Xvfb гонка) и ни разу не зашёл → переотправляем
 // столько раз, пока мит не кончился. Гонка при повторе почти всегда проходит.
 const MAX_LAUNCH_RETRIES = Number(process.env.LAUNCH_RETRIES || 2);
+// Сколько раз возвращать бота в ИДУЩИЙ мит, если у него встало аудио (не «призрак»,
+// а зависший аудио-конвейер: 03.09.2026 бот на 2-м часу раздулся до 8 ГБ и перестал
+// слать чанки, сторож принял это за конец мита и разослал неполную заметку).
+const MAX_REVIVES = Number(process.env.MAX_REVIVES || 3);
+// Метка разрыва в склеенном транскрипте — чтобы модель не сшивала фразы через дыру.
+const REVIVE_GAP = "[перерыв в записи: бот завис и был переотправлен]";
 
 // Момент запуска (пробуждения) раннера. У нас нет 24/7 сервера: включил ПК →
 // поднял Docker → раннер ожил. Если в этот момент уже идёт мит, начавшийся ДО
@@ -183,6 +189,44 @@ async function collectFinished(log: string[], running: Map<string, number>, skip
       }
       const audioStale = lastAudioMs > 0 && now - lastAudioMs > GHOST_NO_AUDIO_MS; // бот-призрак
       const hardCap = now > startMs + HARD_MAX_MS; // дальний предохранитель
+
+      // АВТОВОЗВРАТ: аудио встало, но мит по календарю ЕЩЁ ИДЁТ → это не конец
+      // мита, а зависший бот. Раньше здесь безусловно шла финализация, и на
+      // длинном мите остаток просто терялся (+ уходила неполная заметка).
+      // Теперь: снимаем зависшего, СОХРАНЯЕМ его транскрипт в carry и заводим
+      // нового. Финализация — только когда мит по календарю кончился, исчерпаны
+      // попытки или сработал дальний предохранитель.
+      if (audioStale && !hardCap && now < endMs && (m.reviveRetries ?? 0) < MAX_REVIVES) {
+        try {
+          await stopBot(m.nativeId);
+        } catch {
+          /* уже мёртв — ок */
+        }
+        // КРИТИЧНО: Vexa отдаёт /transcripts только по ПОСЛЕДНЕЙ сессии, поэтому
+        // текущий транскрипт надо забрать ДО запуска новой, иначе начало мита пропадёт.
+        const sofar = await safeTranscript(m.nativeId);
+        if (sofar) {
+          m.transcriptCarry = [m.transcriptCarry, sofar].filter(Boolean).join(`\n${REVIVE_GAP}\n`);
+        }
+        try {
+          await requestBot(m.nativeId);
+          m.reviveRetries = (m.reviveRetries ?? 0) + 1;
+          m.lastTranscriptLen = undefined; // счёт роста — заново, по новой сессии
+          m.lastProgressAtISO = nowISO();
+          m.botGoneAtISO = undefined;
+          await saveMeeting(m); // статус остаётся joining, мит остаётся active
+          log.push(
+            `revive #${m.reviveRetries} (аудио встало, мит идёт): ${m.title} ` +
+              `[сохранено ${m.transcriptCarry?.length ?? 0} символов]`,
+          );
+        } catch (e) {
+          // не смогли поднять — не теряем carry, попробуем на следующем тике
+          await saveMeeting(m);
+          log.push(`revive failed: ${m.title}: ${e}`);
+        }
+        continue;
+      }
+
       if (audioStale || hardCap) {
         try {
           await stopBot(m.nativeId);
@@ -233,6 +277,17 @@ async function collectFinished(log: string[], running: Map<string, number>, skip
         }
         continue;
       }
+      // Последняя сессия пуста, но от прошлых что-то накопилось (был автовозврат)
+      // → это не «пустой мит», а обрыв в конце. Отдаём в заметки то, что есть.
+      if (m.transcriptCarry) {
+        m.transcript = m.transcriptCarry;
+        m.status = "awaiting_notes";
+        await saveMeeting(m);
+        await unmarkActive(eventId);
+        await markPending(eventId);
+        log.push(`transcript captured (только сохранённые сессии) → notes pending: ${m.title}`);
+        continue;
+      }
       m.status = "failed";
       m.error = "Транскрипт пуст: бота не впустили / упал на старте / никто не говорил";
       await saveMeeting(m);
@@ -240,7 +295,8 @@ async function collectFinished(log: string[], running: Map<string, number>, skip
       log.push(`no transcript: ${m.title}`);
       continue;
     }
-    m.transcript = tr;
+    // Склейка с сессиями до автовозврата (Vexa отдаёт только последнюю).
+    m.transcript = [m.transcriptCarry, tr].filter(Boolean).join(`\n${REVIVE_GAP}\n`);
     m.status = "awaiting_notes";
     await saveMeeting(m);
     await unmarkActive(eventId);
