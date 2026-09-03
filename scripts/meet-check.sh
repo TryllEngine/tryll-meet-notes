@@ -23,7 +23,11 @@ done
 echo "── Патчи бота (vexa-lite) ──"
 check_patch(){ docker exec vexa-lite grep -q "$1" "$2" 2>/dev/null && ok "$3" || err "$3 — ПАТЧ ОТСУТСТВУЕТ"; }
 check_patch "tryll local profile" /app/vexa-bot/dist/index.js "auth (профиль socials@)"
-check_patch "tryll knock-if-external" /app/vexa-bot/dist/platforms/googlemeet/join.js "knock (стук на внешних)"
+# join.js НАМЕРЕННО не патчится с 26.06: вернули штатный «Ask to join» (внешний
+# организатор → бот стучится и ждёт впуска). Раньше здесь искался маркер
+# «tryll knock-if-external» — удалённый патч, из-за чего проверка вечно горела
+# красным. Проверяем то, что реально важно: штатная логика входа на месте.
+check_patch "Ask to join" /app/vexa-bot/dist/platforms/googlemeet/join.js "join (штатный «Ask to join»)"
 check_patch "tryll-leave-guard" /app/vexa-bot/dist/platforms/googlemeet/recording.js "leave-guard"
 check_patch "tryll fullframe" /app/vexa-bot/dist/services/screen-content.js "camera (логотип)"
 check_patch "tryll-clean-stale-x" /app/vexa-bot/bot-slot-wrapper.sh "auto-clean X locks"
