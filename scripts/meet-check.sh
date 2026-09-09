@@ -39,6 +39,38 @@ ok "удалено зависших дисплеев: ${removed:-0}"
 echo "── Раннер ──"
 docker logs tryll-runner --since 5m 2>&1 | grep -qiE 'tick error|unhandled|exception' && err "раннер: ошибки за 5 мин" || ok "раннер: ошибок нет"
 
+echo "── Заходит ли бот вообще ──"
+# 09.09.2026: Google выкатил на socials@ флаг «Verify it's you» — бот доходил до
+# экрана переподтверждения пароля, ввести его не мог и выходил. ШЕСТЬ митов за день
+# легли с пустым транскриптом, а эта проверка всё утро показывала 🟢: контейнеры,
+# патчи и API были в порядке, а вот ЗАХОДИТ ли бот — никто не смотрел.
+# Логика: смотрим ПОСЛЕДНИЕ 3 завершённых мита. Все три упали — бот не заходит.
+# Не окно по времени: иначе после починки проверка ещё сутки держала бы красный,
+# а один успешный мит гасит тревогу сразу.
+verdict=$(docker exec tryll-runner sh -c 'cat /data/store.json' 2>/dev/null | PYTHONIOENCODING=utf-8 python -c '
+import sys, json
+try: s = json.load(sys.stdin)
+except Exception: print("SKIP"); raise SystemExit
+ms = [v for v in (s.get("meetings") or {}).values()
+      if v.get("status") in ("done", "failed") and (v.get("startISO") or "")]
+ms.sort(key=lambda v: v["startISO"])
+last = ms[-3:]
+if not last: print("SKIP"); raise SystemExit
+failed = [v for v in last if v["status"] == "failed"]
+if len(failed) == len(last) and len(last) >= 2:
+    print("FAIL подряд упало митов: %d (последний — %s)" % (len(failed), last[-1].get("title") or "?"))
+elif failed:
+    print("WARN из последних %d митов упало %d" % (len(last), len(failed)))
+else:
+    print("OK последние %d мита записаны" % len(last))
+' 2>/dev/null)
+case "${verdict:-SKIP}" in
+  FAIL*) err "история: ${verdict#FAIL } → бот, похоже, НЕ ЗАХОДИТ. Обычная причина — Google просит «Verify it's you» у socials@: посмотри /app/storage/screenshots/bot-checkpoint-auth-lobby.png, и если там экран переподтверждения — свежий ручной логин через scripts/login-helper (noVNC :6080). Это оценка по прошлым митам: гаснет после первого удачного" ;;
+  WARN*) ok "${verdict#WARN } (часть митов падает — посмотри причины)" ;;
+  OK*)   ok "${verdict#OK }" ;;
+  *)     ok "история митов недоступна — пропущено" ;;
+esac
+
 echo "── Vexa API / токен / GPU ──"
 curl -sf -m 5 http://localhost:8056/bots/status -H "X-API-Key: $KEY" >/dev/null 2>&1 && ok "Vexa API отвечает" || err "Vexa API недоступен"
 docker exec tryll-runner sh -c 'test -n "$CLAUDE_CODE_OAUTH_TOKEN"' 2>/dev/null && ok "Claude-токен на месте" || err "Claude-токен ОТСУТСТВУЕТ"
