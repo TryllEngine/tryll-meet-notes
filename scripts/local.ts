@@ -3,7 +3,28 @@
  * Запуск: npm run local (читает .env из корня проекта).
  */
 import "dotenv/config";
+import { writeFileSync } from "fs";
+import { dirname } from "path";
 import { runTick } from "../src/core";
+
+// Пульс: каждый ЗАВЕРШЁННЫЙ тик обновляет файл. По нему watchdog и meet-check
+// понимают, жив ли раннер. Раньше судили по росту лога — оказалось ненадёжно:
+// точки пишутся без перевода строки, Docker отдаёт их рывками (полка ~минуту,
+// потом скачок), и короткое окно замера ловит ложное «не тикает». Ложный вердикт
+// опасен: watchdog перезапустил бы раннер посреди мита.
+const HEARTBEAT_FILE =
+  process.env.HEARTBEAT_FILE ||
+  `${dirname(process.env.STORE_FILE || "/data/store.json")}/heartbeat`;
+
+// Пишем ИМЕННО epoch-секунды: возраст пульса тогда считается вычитанием в любом
+// shell, без парсинга дат внутри контейнера.
+function beat() {
+  try {
+    writeFileSync(HEARTBEAT_FILE, String(Math.floor(Date.now() / 1000)), "utf-8");
+  } catch {
+    /* нет диска — не повод ронять тик */
+  }
+}
 
 const INTERVAL_MS = 30_000;
 // Сколько тик может законно длиться. Дольше — считаем, что заклинило: busy
@@ -47,6 +68,7 @@ async function tick() {
   } finally {
     busy = false;
     busySince = 0;
+    beat(); // тик дошёл до конца — значит раннер жив
   }
 }
 

@@ -48,25 +48,29 @@ while true; do
   # Vexa 503/ECONNREFUSED на старте раннер замолчал в 06:27 и почти два часа
   # ничего не делал, контейнер при этом был «Up» и healthy — пропустили мит.
   #
-  # КАК: живой раннер дописывает точку в лог каждые 30 сек, то есть РАЗМЕР лога
-  # растёт. Не растёт 3 проверки подряд (~3 мин) — значит заклинило, перезапускаем.
-  # (Считать сами точки через --since нельзя: они идут одной незакрытой строкой,
-  # и docker отдаёт её целиком независимо от возраста.)
-  sz=$(docker logs tryll-runner 2>&1 | wc -c | tr -d ' ')
-  if [ "${sz:-0}" = "${RUNNER_SZ:-}" ]; then
-    RUNNER_STUCK=$((${RUNNER_STUCK:-0} + 1))
-    echo "$(date -u) раннер молчит ($RUNNER_STUCK/3): лог не растёт ($sz байт)"
-    if [ "$RUNNER_STUCK" -ge 3 ]; then
-      echo "$(date -u) раннер ЗАКЛИНИЛ → перезапускаю tryll-runner"
-      docker restart tryll-runner >/dev/null 2>&1 || echo "$(date -u) restart раннера не удался"
+  # КАК: раннер обновляет /data/heartbeat в конце КАЖДОГО тика. Отметка старше
+  # 5 минут = заклинило. По росту лога судить нельзя: точки пишутся без перевода
+  # строки и Docker отдаёт их рывками (полка ~минуту, потом скачок) — короткое
+  # окно замера даёт ложное «не тикает», а ложный перезапуск посреди мита опасен.
+  # Пока пульса нет (старый образ раннера) — не трогаем раннер вообще.
+  hb=$(docker exec tryll-runner sh -c 'cat /data/heartbeat 2>/dev/null' 2>/dev/null | tr -dc '0-9')
+  if [ -n "$hb" ]; then
+    age=$(( $(date +%s) - hb ))
+    if [ "$age" -gt 300 ]; then
+      RUNNER_STUCK=$((${RUNNER_STUCK:-0} + 1))
+      echo "$(date -u) раннер молчит ($RUNNER_STUCK/3): пульсу $age сек"
+      if [ "$RUNNER_STUCK" -ge 3 ]; then
+        echo "$(date -u) раннер ЗАКЛИНИЛ → перезапускаю tryll-runner"
+        docker restart tryll-runner >/dev/null 2>&1 || echo "$(date -u) restart раннера не удался"
+        RUNNER_STUCK=0
+        sleep 60   # дать подняться, не долбить проверками
+      fi
+    else
       RUNNER_STUCK=0
-      sleep 60   # дать подняться, не долбить проверками
-      sz=$(docker logs tryll-runner 2>&1 | wc -c | tr -d ' ')
     fi
   else
-    RUNNER_STUCK=0
+    RUNNER_STUCK=0   # пульса нет (старый образ раннера) — раннер не трогаем
   fi
-  RUNNER_SZ="$sz"
 
   # 3) Осиротевшие Xvfb внутри vexa-lite (каждые ~10 мин)
   #

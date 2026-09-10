@@ -41,13 +41,17 @@ docker logs tryll-runner --since 5m 2>&1 | grep -qiE 'tick error|unhandled|excep
 # ЖИВОЙ ли тик. 10.09.2026: раннер замолчал (завис await внутри runTick, флаг busy
 # остался true) и почти два часа ничего не делал — контейнер «Up» и healthy, ошибок
 # в логе нет, то есть проверка выше давала ✅ при полностью мёртвом раннере и
-# пропущенном мите. Живой раннер дописывает точку каждые 30 сек → лог РАСТЁТ.
-# (Считать точки через --since нельзя: они идут одной незакрытой строкой.)
-s1=$(docker logs tryll-runner 2>&1 | wc -c | tr -d ' ')
-sleep 35
-s2=$(docker logs tryll-runner 2>&1 | wc -c | tr -d ' ')
-if [ "$s1" != "$s2" ]; then ok "раннер тикает (лог растёт)"
-else err "раннер НЕ ТИКАЕТ — завис (лог не вырос за 35 сек). Лечение: docker restart tryll-runner"; fi
+# пропущенном мите. Судим по /data/heartbeat (обновляется в конце каждого тика);
+# по росту лога судить нельзя — точки идут без перевода строки и Docker отдаёт их
+# рывками, короткое окно замера даёт ложную тревогу.
+hb=$(docker exec tryll-runner sh -c 'cat /data/heartbeat 2>/dev/null' 2>/dev/null | tr -dc '0-9')
+if [ -z "$hb" ]; then
+  ok "пульс раннера недоступен (старый образ) — пропущено"
+else
+  age=$(( $(date +%s) - hb ))
+  if [ "$age" -le 120 ]; then ok "раннер тикает (пульс ${age}с назад)"
+  else err "раннер НЕ ТИКАЕТ — пульсу ${age}с (завис). Лечение: docker restart tryll-runner"; fi
+fi
 
 echo "── Заходит ли бот вообще ──"
 # 09.09.2026: Google выкатил на socials@ флаг «Verify it's you» — бот доходил до
