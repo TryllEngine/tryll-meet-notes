@@ -6,9 +6,17 @@
 
 const base = () => (process.env.VEXA_BASE_URL ?? "").replace(/\/$/, "");
 
+// Таймаут на КАЖДЫЙ запрос к Vexa. Без него зависший коннект вешает весь тик
+// НАВСЕГДА: в scripts/local.ts флаг busy сбрасывается в finally, до которого
+// подвисший await не доходит, и раннер молча умирает при живом контейнере
+// (10.09.2026: после Vexa 503/ECONNREFUSED на старте раннер встал на 2 часа и
+// пропустил мит). Лучше упасть с ошибкой — тик её поймает и продолжит.
+const FETCH_TIMEOUT_MS = Number(process.env.VEXA_FETCH_TIMEOUT_MS || 30_000);
+
 async function vexaFetch(path: string, init?: RequestInit): Promise<Response> {
   const res = await fetch(`${base()}${path}`, {
     ...init,
+    signal: init?.signal ?? AbortSignal.timeout(FETCH_TIMEOUT_MS),
     headers: {
       "Content-Type": "application/json",
       "X-API-Key": process.env.VEXA_API_KEY ?? "",

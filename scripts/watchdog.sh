@@ -39,7 +39,36 @@ while true; do
     fi
   fi
 
-  # 2) Осиротевшие Xvfb внутри vexa-lite (каждые ~10 мин)
+  # 2) Раннер ЖИВ ли? (заклинивший тик — контейнер «Up», а работы нет)
+  #
+  # ЗАЧЕМ: в scripts/local.ts у тика есть флаг busy, чтобы тики не наезжали друг
+  # на друга. Сбрасывается он в finally — но если внутри runTick какой-то await
+  # зависнет НАВСЕГДА (напр. HTTP к Vexa без таймаута), busy останется true и все
+  # следующие тики будут молча выходить. 10.09.2026 так и вышло: после ошибок
+  # Vexa 503/ECONNREFUSED на старте раннер замолчал в 06:27 и почти два часа
+  # ничего не делал, контейнер при этом был «Up» и healthy — пропустили мит.
+  #
+  # КАК: живой раннер дописывает точку в лог каждые 30 сек, то есть РАЗМЕР лога
+  # растёт. Не растёт 3 проверки подряд (~3 мин) — значит заклинило, перезапускаем.
+  # (Считать сами точки через --since нельзя: они идут одной незакрытой строкой,
+  # и docker отдаёт её целиком независимо от возраста.)
+  sz=$(docker logs tryll-runner 2>&1 | wc -c | tr -d ' ')
+  if [ "${sz:-0}" = "${RUNNER_SZ:-}" ]; then
+    RUNNER_STUCK=$((${RUNNER_STUCK:-0} + 1))
+    echo "$(date -u) раннер молчит ($RUNNER_STUCK/3): лог не растёт ($sz байт)"
+    if [ "$RUNNER_STUCK" -ge 3 ]; then
+      echo "$(date -u) раннер ЗАКЛИНИЛ → перезапускаю tryll-runner"
+      docker restart tryll-runner >/dev/null 2>&1 || echo "$(date -u) restart раннера не удался"
+      RUNNER_STUCK=0
+      sleep 60   # дать подняться, не долбить проверками
+      sz=$(docker logs tryll-runner 2>&1 | wc -c | tr -d ' ')
+    fi
+  else
+    RUNNER_STUCK=0
+  fi
+  RUNNER_SZ="$sz"
+
+  # 3) Осиротевшие Xvfb внутри vexa-lite (каждые ~10 мин)
   #
   # ЗАЧЕМ: bot-slot-wrapper.sh поднимает на каждого бота свой Xvfb (:101-:199) и
   # делает exec на настоящий entrypoint — из-за exec обёртка исчезает и УБИТЬ свой
@@ -69,7 +98,7 @@ while true; do
     ' 2>/dev/null | while read -r l; do echo "$(date -u) $l"; done
   fi
 
-  # 3) Периодическая чистка старых записей (профилактика раздутия)
+  # 4) Периодическая чистка старых записей (профилактика раздутия)
   if [ "$((ITER % CLEAN_EVERY))" -eq 0 ]; then
     echo "$(date -u) чищу записи старше 5 дней"
     docker exec vexa-lite sh -c 'find /var/lib/vexa/recordings/recordings -type f -mtime +5 -delete 2>/dev/null; find /var/lib/vexa/recordings/recordings -mindepth 1 -type d -empty -delete 2>/dev/null' || true
