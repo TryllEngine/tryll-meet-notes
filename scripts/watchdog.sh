@@ -26,16 +26,35 @@ while true; do
   ITER=$((ITER + 1))
 
   # 1) Здоровье runtime_api → при смерти перезапускаем vexa-lite
+  #
+  # ДВА ПРЕДОХРАНИТЕЛЯ (оба добавлены 16.09.2026 после реального инцидента):
+  #
+  # а) ПАУЗА ПОСЛЕ ПЕРЕЗАПУСКА была 180 сек — МЕНЬШЕ, чем реальный старт vexa-lite
+  #    (~4-5 мин до готовности runtime_api). Итог: перезапустили в 08:03:29, в
+  #    08:07:34 движок ещё поднимался, watchdog счёл его мёртвым и перезапустил
+  #    ПОВТОРНО в 08:08:34 — сам себе петля. Отправка бота в этот момент падала
+  #    с 503. Держим 420 сек — заведомо больше старта.
+  #
+  # б) НЕ ПЕРЕЗАПУСКАЕМ, ПОКА БОТ ПИШЕТ МИТ. Смерть runtime_api означает лишь,
+  #    что не запустятся НОВЫЕ боты; уже сидящий в мите продолжает писать.
+  #    Перезапуск же убил бы живую запись вместе с контейнером. Поэтому ждём
+  #    конца мита — новые боты всё равно не нужны, пока идёт текущий.
   if docker exec vexa-lite python3 -c "$RT_CHECK" >/dev/null 2>&1; then
     FAILS=0
   else
     FAILS=$((FAILS + 1))
     echo "$(date -u) runtime_api не отвечает ($FAILS/2)"
     if [ "$FAILS" -ge 2 ]; then
-      echo "$(date -u) runtime_api МЁРТВ → перезапускаю vexa-lite"
-      docker restart vexa-lite >/dev/null 2>&1 || echo "$(date -u) restart не удался"
-      FAILS=0
-      sleep 180   # дать движку подняться, не долбить проверками
+      busy=$(docker exec vexa-lite sh -c 'ps aux | grep -c "[c]hrome"' 2>/dev/null | tr -dc '0-9')
+      if [ "${busy:-0}" -ge 5 ]; then
+        echo "$(date -u) runtime_api мёртв, НО бот сейчас пишет мит ($busy проц. chrome) — перезапуск отложен"
+        FAILS=1   # держим «на грани», проверим снова через минуту
+      else
+        echo "$(date -u) runtime_api МЁРТВ → перезапускаю vexa-lite"
+        docker restart vexa-lite >/dev/null 2>&1 || echo "$(date -u) restart не удался"
+        FAILS=0
+        sleep 420   # старт vexa-lite ~4-5 мин; меньше — ловим себя в петлю перезапусков
+      fi
     fi
   fi
 
