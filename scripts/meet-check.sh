@@ -70,6 +70,13 @@ ms = [v for v in (s.get("meetings") or {}).values()
 ms.sort(key=lambda v: v["startISO"])
 last = ms[-3:]
 if not last: print("SKIP"); raise SystemExit
+# Бот заходил ГОСТЕМ = сработал откат, потому что authenticated упёрся в
+# «Verify it's you». Мит записался, но куки socials@ протухли — без свежего
+# логина каждый следующий мит придётся впускать руками. Иначе откат тихо
+# маскирует проблему, и мы узнаём о ней, когда кто-то не впустит бота.
+if any(v.get("joinedAsGuest") for v in last):
+    print("GUEST бот заходил ГОСТЕМ — куки socials@ протухли")
+    raise SystemExit
 failed = [v for v in last if v["status"] == "failed"]
 if len(failed) == len(last) and len(last) >= 2:
     print("FAIL подряд упало митов: %d (последний — %s)" % (len(failed), last[-1].get("title") or "?"))
@@ -80,6 +87,7 @@ else:
 ' 2>/dev/null)
 case "${verdict:-SKIP}" in
   FAIL*) err "история: ${verdict#FAIL } → бот, похоже, НЕ ЗАХОДИТ. Обычная причина — Google просит «Verify it's you» у socials@: посмотри /app/storage/screenshots/bot-checkpoint-auth-lobby.png, и если там экран переподтверждения — свежий ручной логин через scripts/login-helper (noVNC :6080). Это оценка по прошлым митам: гаснет после первого удачного" ;;
+  GUEST*) err "${verdict#GUEST } → нужен свежий ручной логин socials@ через scripts/login-helper (noVNC :6080), иначе каждый мит придётся впускать руками. Миты при этом записываются — откат сработал" ;;
   WARN*) ok "${verdict#WARN } (часть митов падает — посмотри причины)" ;;
   OK*)   ok "${verdict#OK }" ;;
   *)     ok "история митов недоступна — пропущено" ;;

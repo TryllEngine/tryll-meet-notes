@@ -26,7 +26,16 @@ async function vexaFetch(path: string, init?: RequestInit): Promise<Response> {
   return res;
 }
 
-export async function requestBot(nativeId: string): Promise<void> {
+/**
+ * @param guest — зайти ГОСТЕМ, без authenticated-режима.
+ *
+ * Зачем: Google периодически вешает на socials@ флаг «Verify it's you», и бот в
+ * authenticated-режиме упирается в экран переподтверждения пароля, ввести его не
+ * может и падает за ~50 секунд (09.09 и 24.09.2026 — каждый раз потеряны миты).
+ * Гостевой заход эту стенку обходит: бот стучится «Ask to join», участник впускает.
+ * Ценой ручного впуска, но мит записывается, а не теряется целиком.
+ */
+export async function requestBot(nativeId: string, guest = false): Promise<void> {
   const body: Record<string, unknown> = {
     platform: "google_meet",
     native_meeting_id: nativeId,
@@ -60,9 +69,11 @@ export async function requestBot(nativeId: string): Promise<void> {
   }
   // Authenticated-режим: бот заходит под доменным аккаунтом (socials@) и его
   // автоматически впускают без зала ожидания. Требует патча scripts/patch_vexa_auth.py
-  // и профиля в vexa-lite:/master-profile. Если cookies не подойдут — бот сам
-  // откатывается на анонимный "Ask to join" (см. join.ts), т.е. деградация мягкая.
-  if (process.env.BOT_AUTHENTICATED === "true") {
+  // и профиля в vexa-lite:/master-profile.
+  // ВАЖНО: раньше здесь было написано, что при плохих куках бот сам откатится на
+  // анонимный «Ask to join». ЭТО НЕВЕРНО — он упирается в «Verify it's you» и
+  // падает. Откат делает раннер: см. guest в core.ts (launch retry).
+  if (process.env.BOT_AUTHENTICATED === "true" && !guest) {
     body.authenticated = true;
   }
   const res = await vexaFetch("/bots", {

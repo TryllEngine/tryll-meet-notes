@@ -265,13 +265,28 @@ async function collectFinished(log: string[], running: Map<string, number>, skip
       // (Аудио — надёжнее «running»: упавший контейнер Vexa на миг метит running,
       // а аудио-чанков у него нет; живой бот пишет аудио даже в тишине.)
       if (!m.everHadAudio && (m.launchRetries ?? 0) < MAX_LAUNCH_RETRIES && now < endMs) {
+        // ЛЕСТНИЦА ПОПЫТОК. Симптом «упал на старте, аудио не было» одинаков у
+        // двух разных причин, поэтому пробуем обе:
+        //  • попытка 1 — снова authenticated: лечит разовый краш Chrome/Xvfb;
+        //  • попытка 2 — ГОСТЕМ: лечит флаг Google «Verify it's you» у socials@,
+        //    об который бот в authenticated-режиме разбивается каждый раз
+        //    (09.09 и 24.09.2026 — миты потеряны целиком). Гостем он стучится
+        //    «Ask to join», кто-то впускает — мит записывается.
+        const guest = (m.launchRetries ?? 0) >= 1;
         try {
-          await requestBot(m.nativeId);
+          await requestBot(m.nativeId, guest);
           m.launchRetries = (m.launchRetries ?? 0) + 1;
           m.botGoneAtISO = undefined;
           m.lastTranscriptLen = undefined;
+          if (guest) m.joinedAsGuest = true;
           await saveMeeting(m); // статус остаётся joining, мит остаётся active
-          log.push(`launch retry #${m.launchRetries} (бот упал на старте): ${m.title}`);
+          log.push(
+            guest
+              ? `launch retry #${m.launchRetries} ГОСТЕМ (authenticated не сработал — ` +
+                  `вероятно «Verify it's you» у socials@, нужен свежий логин): ${m.title}. ` +
+                  `БОТА НАДО ВПУСТИТЬ В МИТЕ`
+              : `launch retry #${m.launchRetries} (бот упал на старте): ${m.title}`,
+          );
         } catch (e) {
           log.push(`launch retry failed: ${m.title}: ${e}`);
         }
