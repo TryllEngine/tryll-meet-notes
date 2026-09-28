@@ -61,21 +61,33 @@ echo "── Заходит ли бот вообще ──"
 # Логика: смотрим ПОСЛЕДНИЕ 3 завершённых мита. Все три упали — бот не заходит.
 # Не окно по времени: иначе после починки проверка ещё сутки держала бы красный,
 # а один успешный мит гасит тревогу сразу.
+# Когда последний раз обновлялись куки в профиле бота (свежий логин ИЛИ обратная
+# запись после удачного мита). Гостевой заход ДО этого момента — уже не проблема.
+COOKIES_TS=$(docker exec vexa-lite sh -c 'stat -c %Y /master-profile/Default/Cookies 2>/dev/null' 2>/dev/null | tr -dc '0-9')
+export COOKIES_TS
 verdict=$(docker exec tryll-runner sh -c 'cat /data/store.json' 2>/dev/null | PYTHONIOENCODING=utf-8 python -c '
-import sys, json
-try: s = json.load(sys.stdin)
-except Exception: print("SKIP"); raise SystemExit
-ms = [v for v in (s.get("meetings") or {}).values()
-      if v.get("status") in ("done", "failed") and (v.get("startISO") or "")]
-ms.sort(key=lambda v: v["startISO"])
-last = ms[-3:]
-if not last: print("SKIP"); raise SystemExit
-# Бот заходил ГОСТЕМ = сработал откат, потому что authenticated упёрся в
-# экран переподтверждения пароля. Мит записался, но куки socials@ протухли: без
-# свежего логина каждый следующий мит придётся впускать руками. Иначе откат тихо
-# маскирует проблему, и мы узнаём о ней, когда бота некому будет впустить.
+import sys, json, os, datetime
 # (Без апострофов: весь этот python-блок обёрнут в ОДИНАРНЫЕ кавычки, и любой
 #  апостроф в комментарии рвёт скрипт — уже наступали.)
+try: s = json.load(sys.stdin)
+except Exception: print("SKIP"); raise SystemExit
+# Судим только по митам ПОСЛЕ последнего обновления кук — свежего логина или
+# обратной записи после удачного мита. Всё, что упало раньше, уже вылечено:
+# иначе после починки красный висел бы ещё несколько митов впустую (28.09.2026).
+cts = int(os.environ.get("COOKIES_TS") or 0)
+def started(v):
+    try: return datetime.datetime.fromisoformat(v["startISO"]).timestamp()
+    except Exception: return 0
+# Сортируем по НАСТОЯЩЕМУ времени, а не по строке: в сторе встречаются разные
+# смещения (+01:00, +02:00, +03:00), и строковое сравнение путало порядок.
+ms = [v for v in (s.get("meetings") or {}).values()
+      if v.get("status") in ("done", "failed") and started(v) > cts]
+ms.sort(key=started)
+last = ms[-3:]
+if not last: print("FRESH"); raise SystemExit
+# Бот заходил ГОСТЕМ = сработал откат, потому что сессия socials@ не принята.
+# Мит записался, но без свежего логина каждый следующий придётся впускать руками.
+# Иначе откат тихо маскирует проблему, и мы узнаём о ней, когда бота некому впустить.
 if any(v.get("joinedAsGuest") for v in last):
     print("GUEST бот заходил ГОСТЕМ — куки socials@ протухли")
     raise SystemExit
@@ -92,6 +104,7 @@ case "${verdict:-SKIP}" in
   GUEST*) err "${verdict#GUEST } → нужен свежий ручной логин socials@ через scripts/login-helper (noVNC :6080), иначе каждый мит придётся впускать руками. Миты при этом записываются — откат сработал" ;;
   WARN*) ok "${verdict#WARN } (часть митов падает — посмотри причины)" ;;
   OK*)   ok "${verdict#OK }" ;;
+  FRESH) ok "куки обновлены недавно, митов после этого ещё не было — проверится на следующем" ;;
   *)     ok "история митов недоступна — пропущено" ;;
 esac
 
