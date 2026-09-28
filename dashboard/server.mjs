@@ -178,7 +178,9 @@ async function redispatch(code) {
     bot_name: BOT_NAME,
     // max_bot_time обязателен: без него Vexa ставит СВОЙ дефолт 2ч, и переотправленный
     // кнопкой бот срезался раньше раннерского (03.09.2026 так и вышло). Держим 4ч — как в src/vexa.ts.
-    automatic_leave: { max_wait_for_admission: 900000, no_one_joined_timeout: 900000, max_time_left_alone: 180000, max_bot_time: 14400000 },
+    // Ожидание 30 мин (было 15): люди задерживаются, переходя с предыдущего мита,
+    // и бот успевал уйти до их прихода. Держим в одном значении с src/vexa.ts.
+    automatic_leave: { max_wait_for_admission: 1800000, no_one_joined_timeout: 1800000, max_time_left_alone: 180000, max_bot_time: 14400000 },
   };
   if (BOT_AVATAR_URL) body.default_avatar_url = BOT_AVATAR_URL;
   if (process.env.BOT_AUTHENTICATED === "true") body.authenticated = true;
