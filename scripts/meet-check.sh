@@ -108,6 +108,37 @@ case "${verdict:-SKIP}" in
   *)     ok "история митов недоступна — пропущено" ;;
 esac
 
+echo "── Жива ли сессия socials@ ──"
+# 12.10.2026. После починки join.js разлогиненный бот больше не падает, а сразу
+# стучится — и прежний сигнал (joinedAsGuest на третьей попытке раннера) пропал:
+# с 30.09 сессия была мёртвой, а эта проверка молчала. Признак надёжнее: бот,
+# отправленный ПОД АККАУНТОМ на ВНУТРЕННИЙ мит (guestPolicy пуст), при живой
+# сессии входит сразу. Побывал в awaiting_admission — значит пришёл разлогиненным.
+# История статусов лежит в Vexa: meetings.data->status_transition.
+codes=$(docker exec tryll-runner sh -c 'cat /data/store.json' 2>/dev/null | PYTHONIOENCODING=utf-8 python -c '
+import sys, json, os, datetime
+cts = int(os.environ.get("COOKIES_TS") or 0)
+try: s = json.load(sys.stdin)
+except Exception: raise SystemExit
+out = []
+for v in (s.get("meetings") or {}).values():
+    try: t = datetime.datetime.fromisoformat(v["startISO"]).timestamp()
+    except Exception: continue
+    if t > cts and not v.get("guestPolicy") and v.get("nativeId"):
+        out.append(chr(39) + v["nativeId"] + chr(39))
+print(",".join(sorted(set(out))))
+' 2>/dev/null)
+if [ -z "$codes" ] || [ -z "$COOKIES_TS" ]; then
+  ok "залогиненных ботов после последнего логина ещё не было — проверится на первом"
+else
+  dead=$(docker exec vexa-postgres psql -U postgres -d vexa -t -A -c "select count(*) from meetings where platform_specific_id in ($codes) and created_at > to_timestamp($COOKIES_TS) and data->'status_transition' @> '[{\"to\":\"awaiting_admission\"}]'::jsonb;" 2>/dev/null | tr -dc '0-9')
+  if [ "${dead:-0}" -gt 0 ]; then
+    err "сессия socials@ МЁРТВАЯ: залогиненный бот $dead раз стучался на внутреннем мите. Миты пишутся, но бота надо впускать руками → свежий логин через scripts/login-helper (noVNC :6080)"
+  else
+    ok "сессия socials@ жива — залогиненные боты входили сразу"
+  fi
+fi
+
 echo "── Vexa API / токен / GPU ──"
 curl -sf -m 5 http://localhost:8056/bots/status -H "X-API-Key: $KEY" >/dev/null 2>&1 && ok "Vexa API отвечает" || err "Vexa API недоступен"
 docker exec tryll-runner sh -c 'test -n "$CLAUDE_CODE_OAUTH_TOKEN"' 2>/dev/null && ok "Claude-токен на месте" || err "Claude-токен ОТСУТСТВУЕТ"

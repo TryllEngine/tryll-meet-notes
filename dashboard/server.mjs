@@ -183,7 +183,14 @@ async function redispatch(code) {
     automatic_leave: { max_wait_for_admission: 1800000, no_one_joined_timeout: 1800000, max_time_left_alone: 180000, max_bot_time: 14400000 },
   };
   if (BOT_AVATAR_URL) body.default_avatar_url = BOT_AVATAR_URL;
-  if (process.env.BOT_AUTHENTICATED === "true") body.authenticated = true;
+  // Под аккаунтом — только если других ботов сейчас нет. Два залогиненных бота
+  // одновременно — две ветки ротации одной сессии Google; 30.09.2026 так её и
+  // потеряли. Кнопкой переотправляют как раз в горячке, когда бот уже где-то
+  // сидит, — поэтому здесь правило важнее всего. Как в src/core.ts.
+  const others = [...(await liveBots())].filter((c) => c !== code).length;
+  if (process.env.BOT_AUTHENTICATED === "true" && (process.env.AUTH_CONCURRENT === "true" || others === 0)) {
+    body.authenticated = true;
+  }
   const r = await fetch(`${VEXA_BASE}/bots`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-API-Key": VEXA_KEY },

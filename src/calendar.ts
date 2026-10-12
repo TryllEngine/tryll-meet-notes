@@ -10,6 +10,10 @@ export interface UpcomingMeeting {
   seriesName: string;
   nativeId: string; // google meet code: abc-defg-hij
   attendees: string[]; // email-адреса приглашённых (для рассылки заметок)
+  /** email организатора. По его домену раннер решает, внешний ли мит: на внешнем
+   *  Google не впускает socials@ автоматически, бот стучится — и такой бот губит
+   *  сессию (см. guestPolicy в core.ts). */
+  organizer?: string;
 }
 
 const MEET_CODE_RE = /meet\.google\.com\/([a-z]{3}-[a-z]{4}-[a-z]{3})/i;
@@ -106,6 +110,7 @@ export async function upcomingMeetings(
       seriesName: ev.recurringEventId ? title : "Разовые встречи",
       nativeId,
       attendees,
+      organizer: (ev.organizer?.email ?? "").toLowerCase() || undefined,
     });
   }
   return out;
