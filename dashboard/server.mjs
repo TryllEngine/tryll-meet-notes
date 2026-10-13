@@ -183,12 +183,12 @@ async function redispatch(code) {
     automatic_leave: { max_wait_for_admission: 1800000, no_one_joined_timeout: 1800000, max_time_left_alone: 180000, max_bot_time: 14400000 },
   };
   if (BOT_AVATAR_URL) body.default_avatar_url = BOT_AVATAR_URL;
-  // Под аккаунтом — только если других ботов сейчас нет. Два залогиненных бота
-  // одновременно — две ветки ротации одной сессии Google; 30.09.2026 так её и
-  // потеряли. Кнопкой переотправляют как раз в горячке, когда бот уже где-то
-  // сидит, — поэтому здесь правило важнее всего. Как в src/core.ts.
+  // Под аккаунтом — всегда (как в src/guest-policy.ts). Запрет «пока работает
+  // другой бот — гостем» (12.10) опровергнут историей: с 09.09 по 24.09 боты под
+  // аккаунтом 9 раз работали одновременно, сессия жила две недели. Вернуть
+  // запрет можно переменной AUTH_CONCURRENT=false.
   const others = [...(await liveBots())].filter((c) => c !== code).length;
-  if (process.env.BOT_AUTHENTICATED === "true" && (process.env.AUTH_CONCURRENT === "true" || others === 0)) {
+  if (process.env.BOT_AUTHENTICATED === "true" && (process.env.AUTH_CONCURRENT !== "false" || others === 0)) {
     body.authenticated = true;
   }
   const r = await fetch(`${VEXA_BASE}/bots`, {

@@ -14,7 +14,10 @@
 FROM vexaai/vexa-lite@sha256:4752bc3cfe4c6a9a334018fe3f7c6a21f56616cd1de370d0c2c9f577206a36ec
 
 COPY patch_vexa_auth.py patch-vexa-speaker.py patch-vexa-leave.py /tryll-patches/
-COPY vexa-image/patch-vexa-display-build.py vexa-image/patch-vexa-camera-build.py vexa-image/patch-vexa-writeback-build.py vexa-image/patch-vexa-accountchooser-build.py vexa-image/patch-vexa-cameralogo-build.py vexa-image/patch-vexa-speaker-fuzz-build.py vexa-image/patch-vexa-gmeet-turns-build.py vexa-image/patch-vexa-askjoin-build.py vexa-image/patch-vexa-navretry-build.py vexa-image/patch-vexa-selfheal-build.py vexa-image/patch-vexa-tokenttl-build.py vexa-image/gmeet-turn-attribution.cjs /tryll-patches/
+COPY vexa-image/patch-vexa-display-build.py vexa-image/patch-vexa-camera-build.py vexa-image/patch-vexa-writeback-build.py vexa-image/patch-vexa-accountchooser-build.py vexa-image/patch-vexa-cameralogo-build.py vexa-image/patch-vexa-speaker-fuzz-build.py vexa-image/patch-vexa-gmeet-turns-build.py vexa-image/patch-vexa-askjoin-build.py vexa-image/patch-vexa-navretry-build.py vexa-image/patch-vexa-selfheal-build.py vexa-image/patch-vexa-tokenttl-build.py vexa-image/patch-vexa-authstate-build.py vexa-image/gmeet-turn-attribution.cjs /tryll-patches/
+
+# Определение «залогинен ли бот» — один исходник для бота и для test-authstate.cjs
+COPY vexa-image/tryll-authstate.cjs /app/vexa-bot/dist/tryll-authstate.cjs
 
 # Наш логотип как дефолтный аватар камеры (надёжно, локально, без сети)
 COPY vexa-image/bot-avatar.png /app/vexa-bot/assets/vexa-logo-default.png
@@ -35,7 +38,10 @@ RUN python3 /tryll-patches/patch_vexa_auth.py \
  && python3 /tryll-patches/patch-vexa-askjoin-build.py \
  && python3 /tryll-patches/patch-vexa-navretry-build.py \
  && python3 /tryll-patches/patch-vexa-selfheal-build.py \
+ && python3 /tryll-patches/patch-vexa-authstate-build.py \
  && node --check /app/vexa-bot/dist/platforms/googlemeet/join.js \
+ && node --check /app/vexa-bot/dist/index.js \
+ && node -e "if (typeof require('/app/vexa-bot/dist/tryll-authstate.cjs').detectAuthState !== 'function') process.exit(1)" \
  && python3 /tryll-patches/patch-vexa-tokenttl-build.py \
  && python3 -m py_compile /app/meeting-api/meeting_api/meetings.py \
  && echo "tryll patches baked OK"

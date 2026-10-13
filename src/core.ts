@@ -13,6 +13,7 @@ import {
   unmarkPending,
 } from "./store";
 import { getTranscript, requestBot, runningBots, stopBot } from "./vexa";
+import { guestPolicyFor, policyLabel } from "./guest-policy";
 
 // Максимум одновременных ботов (слотов). По расчёту больше 3 митов разом не бывает.
 const MAX_CONCURRENT = Number(process.env.MAX_CONCURRENT_BOTS || 3);
@@ -33,27 +34,18 @@ const MAX_LAUNCH_RETRIES = Number(process.env.LAUNCH_RETRIES || 2);
 // а зависший аудио-конвейер: 03.09.2026 бот на 2-м часу раздулся до 8 ГБ и перестал
 // слать чанки, сторож принял это за конец мита и разослал неполную заметку).
 const MAX_REVIVES = Number(process.env.MAX_REVIVES || 3);
-// КОГДА ИДТИ ГОСТЕМ, ДАЖЕ ПРИ ЖИВОЙ СЕССИИ (12.10.2026).
-// Каждый бот под socials@ при открытии Meet РОТИРУЕТ общую сессию Google, а
-// записывает новые куки обратно в /master-profile только тот, кто вошёл кнопкой
-// «Join now» / «Join anyway». 30.09.2026 два бота стартовали в одну секунду:
-// внутренний мит вошёл и записал куки, а бот на ВНЕШНЕМ мите стучался, ротировал
-// сессию в 08:06:43 и обратно не записал. Профиль остался с устаревшим токеном,
-// и с этого момента все боты приходили разлогиненными (до 12.10).
-// Отсюда два правила:
-//  • внешний мит (организатор не из нашего домена) — гостем. Под аккаунтом там
-//    всё равно стучишься, выигрыша ноль, а сессию губишь;
-//  • если уже работает другой бот — гостем. Два залогиненных бота — две ветки
-//    ротации одной сессии. Выключается AUTH_CONCURRENT=true.
-const COMPANY_DOMAIN = (process.env.COMPANY_DOMAIN || "tryllengine.com").toLowerCase();
-const AUTH_CONCURRENT = process.env.AUTH_CONCURRENT === "true";
-function guestPolicyFor(organizer: string | undefined, otherBots: number): "external" | "concurrent" | undefined {
-  if (organizer && !organizer.endsWith(`@${COMPANY_DOMAIN}`)) return "external";
-  if (!AUTH_CONCURRENT && otherBots > 0) return "concurrent";
-  return undefined;
+// Когда слать бота гостем при живой сессии — см. src/guest-policy.ts.
+// По умолчанию НИКОГДА: правило «другой бот работает → гостем» (12.10) опровергнуто
+// историей и 13.10 зря отправило стучаться трёх ботов.
+/** Сколько ДРУГИХ митов сейчас ведёт бот под аккаунтом (гости и застрявшие не в счёт). */
+async function authBotsElsewhere(exceptNative: string): Promise<number> {
+  let n = 0;
+  for (const id of await listActive()) {
+    const r = await getMeeting(id);
+    if (r && r.nativeId !== exceptNative && r.status === "joining" && !r.guestPolicy) n++;
+  }
+  return n;
 }
-const policyLabel = (p?: string) =>
-  p === "external" ? " ГОСТЕМ (внешний мит)" : p === "concurrent" ? " ГОСТЕМ (уже работает другой бот)" : "";
 
 // Метка разрыва в склеенном транскрипте — чтобы модель не сшивала фразы через дыру.
 const REVIVE_GAP = "[перерыв в записи: бот завис и был переотправлен]";
@@ -141,8 +133,8 @@ async function dispatchBots(log: string[], running: Map<string, number>, skip: S
       continue; // лимит занят — повторим в следующий тик (мит ещё в окне календаря)
     }
     try {
-      // used = боты, уже работающие в других митах (включая отправленных в этом же тике)
-      const guestPolicy = guestPolicyFor(m.organizer, used.size);
+      // считаем только ботов ПОД АККАУНТОМ в других митах (вкл. отправленных в этом тике)
+      const guestPolicy = guestPolicyFor(m.organizer, await authBotsElsewhere(m.nativeId));
       await requestBot(m.nativeId, !!guestPolicy);
       // Запись сохраняем ТОЛЬКО после успешного запроса. Транзиентная ошибка
       // (сеть / Vexa перезапускается) НЕ маркируется навсегда — ретрай в след. тик.
@@ -235,7 +227,7 @@ async function collectFinished(log: string[], running: Map<string, number>, skip
         try {
           // те же правила, что при первой отправке: политика мита + не плодить
           // залогиненных ботов параллельно с другими митами
-          const others = [...running.keys()].filter((k) => k !== m.nativeId).length;
+          const others = await authBotsElsewhere(m.nativeId);
           await requestBot(m.nativeId, !!(m.guestPolicy || guestPolicyFor(m.organizer, others)));
           m.reviveRetries = (m.reviveRetries ?? 0) + 1;
           m.lastTranscriptLen = undefined; // счёт роста — заново, по новой сессии
@@ -299,7 +291,7 @@ async function collectFinished(log: string[], running: Map<string, number>, skip
         //    об который бот в authenticated-режиме разбивается каждый раз
         //    (09.09 и 24.09.2026 — миты потеряны целиком). Гостем он стучится
         //    «Ask to join», кто-то впускает — мит записывается.
-        const others = [...running.keys()].filter((k) => k !== m.nativeId).length;
+        const others = await authBotsElsewhere(m.nativeId);
         const policy = m.guestPolicy || guestPolicyFor(m.organizer, others);
         const guest = !!policy || (m.launchRetries ?? 0) >= 1;
         try {

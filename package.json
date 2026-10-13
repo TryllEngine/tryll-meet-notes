@@ -8,6 +8,11 @@
     "test:identity": "tsx scripts/test-identity-preserving.ts",
     "test:gmeet-turns": "node scripts/vexa-image/test-gmeet-turn-attribution.cjs",
     "test:vexa-patch": "python scripts/vexa-image/test-vexa-gmeet-turns-patch.py",
+    "test:guest-policy": "tsx --test scripts/test-guest-policy.ts",
+    "test:authstate-patch": "python scripts/vexa-image/test-vexa-authstate-patch.py",
+    "test:auth-verdict": "python scripts/test-auth-state-verdict.py",
+    "test:authstate": "docker cp scripts/vexa-image/tryll-authstate.cjs vexa-lite:/tmp/tryll-authstate.cjs && docker cp scripts/vexa-image/test-authstate.cjs vexa-lite:/tmp/test-authstate.cjs && docker exec vexa-lite node /tmp/test-authstate.cjs",
+    "test:bot": "npm run -s typecheck && npm run -s test:guest-policy && npm run -s test:authstate-patch && npm run -s test:auth-verdict && npm run -s test:authstate && npm run -s test:vexa-patch && npm run -s test:gmeet-turns",
     "local": "tsx scripts/local.ts"
   },
   "dependencies": {
